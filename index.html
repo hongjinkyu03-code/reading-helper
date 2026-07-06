@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#b45309">
+  <title>독서 도우미</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+  <link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+  <header class="app-header">
+    <h1>📖 독서 도우미</h1>
+    <span id="today-date"></span>
+  </header>
+
+  <main>
+    <!-- 홈 탭 -->
+    <section id="tab-home" class="tab active">
+      <div class="stat-row">
+        <div class="card stat-card">
+          <div class="stat-value" id="streak-value">0</div>
+          <div class="stat-label">🔥 연속 기록 (일)</div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-value" id="today-pages">0</div>
+          <div class="stat-label">오늘 읽은 쪽수</div>
+        </div>
+      </div>
+
+      <div class="card quote-card">
+        <h2>오늘의 문장 <button id="quote-shuffle" class="icon-btn" title="다른 문장 보기">🔄</button></h2>
+        <div id="today-quote"></div>
+      </div>
+
+      <div class="card">
+        <h2>오늘의 독서 기록</h2>
+        <div id="log-form-wrap">
+          <form id="log-form">
+            <label>어떤 책을 읽었나요?
+              <select id="log-book" required></select>
+            </label>
+            <div class="form-row">
+              <label>읽은 쪽수
+                <input type="number" id="log-pages" min="0" placeholder="예: 30">
+              </label>
+              <label>읽은 시간(분)
+                <input type="number" id="log-minutes" min="0" placeholder="예: 20">
+              </label>
+            </div>
+            <label>한 줄 메모 (선택)
+              <input type="text" id="log-memo" placeholder="오늘 읽은 부분에서 기억에 남는 것">
+            </label>
+            <button type="submit" class="btn primary">기록하기</button>
+          </form>
+        </div>
+        <p id="no-reading-book" class="empty-msg hidden">
+          읽는 중인 책이 없어요.<br>책장 탭에서 책을 추가해 주세요!
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>⏱️ 독서 타이머</h2>
+        <div class="timer-display" id="timer-display">20:00</div>
+        <div class="timer-controls">
+          <label class="timer-min-label"><input type="number" id="timer-minutes" min="1" max="180" value="20"> 분</label>
+          <button class="btn-small" id="timer-start">▶ 시작</button>
+          <button class="btn-small hidden" id="timer-pause">⏸ 일시정지</button>
+          <button class="btn-small danger" id="timer-reset">초기화</button>
+        </div>
+        <p class="timer-hint" id="timer-hint">타이머가 끝나면 읽은 시간이 위 기록 폼에 자동으로 채워져요.</p>
+      </div>
+
+      <div class="card">
+        <h2>🌱 실천 약속 <span class="sub">책에서 얻은 것을 행동으로</span></h2>
+        <div id="action-list"></div>
+        <form id="action-form" class="action-form">
+          <input type="text" id="action-text" placeholder="직접 추가 (예: 아침에 10분 걷기)">
+          <button type="submit" class="btn-small">추가</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>장르 밸런스 <span class="sub">읽는 중 + 완독 기준</span></h2>
+        <div id="genre-balance"></div>
+      </div>
+
+      <div class="card">
+        <h2>독서 잔디밭 <span class="sub">최근 16주</span></h2>
+        <div id="heatmap" class="heatmap"></div>
+        <div class="heatmap-legend">
+          <span>적게</span>
+          <i class="cell l0"></i><i class="cell l1"></i><i class="cell l2"></i><i class="cell l3"></i><i class="cell l4"></i>
+          <span>많이</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>⏰ 독서 알림</h2>
+        <p class="notify-desc">매일 정한 시간에 유명한 책 구절과 함께 독서 알림을 보내드려요.</p>
+        <div class="notify-row">
+          <input type="time" id="notify-time" value="21:00">
+          <button class="btn-small" id="notify-toggle">알림 켜기</button>
+          <button class="btn-small" id="notify-test">미리 보기</button>
+        </div>
+        <p class="notify-status" id="notify-status"></p>
+      </div>
+    </section>
+
+    <!-- 책장 탭 -->
+    <section id="tab-books" class="tab">
+      <div class="card">
+        <h2>새 책 추가</h2>
+        <form id="book-form">
+          <label>제목
+            <input type="text" id="book-title" required placeholder="책 제목">
+          </label>
+          <div class="form-row">
+            <label>지은이 (선택)
+              <input type="text" id="book-author" placeholder="지은이">
+            </label>
+            <label>전체 쪽수 (선택)
+              <input type="number" id="book-pages" min="1" placeholder="예: 320">
+            </label>
+          </div>
+          <label>장르
+            <select id="book-genre"></select>
+          </label>
+          <label>어디에 넣을까요?
+            <select id="book-status">
+              <option value="reading">지금 바로 읽기 시작</option>
+              <option value="queue">나중에 읽을 책 (대기열)</option>
+            </select>
+          </label>
+          <button type="submit" class="btn primary">책장에 추가</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>📕 읽는 중</h2>
+        <div id="list-reading" class="book-list"></div>
+      </div>
+      <div class="card">
+        <h2>📚 읽고 싶은 책</h2>
+        <div id="list-queue" class="book-list"></div>
+      </div>
+      <div class="card">
+        <h2>✅ 완독한 책</h2>
+        <div id="list-done" class="book-list"></div>
+      </div>
+    </section>
+
+    <!-- 문장 탭 -->
+    <section id="tab-quotes" class="tab">
+      <div class="card">
+        <h2>문장 수집하기</h2>
+        <form id="quote-form">
+          <label>마음에 남은 문장
+            <textarea id="quote-text" rows="3" required placeholder="책에서 옮겨 적고 싶은 문장을 적어주세요"></textarea>
+          </label>
+          <label>어느 책에서 왔나요?
+            <select id="quote-book"></select>
+          </label>
+          <label id="quote-source-wrap" class="hidden">책 이름 직접 입력
+            <input type="text" id="quote-source" placeholder="예: 어린 왕자">
+          </label>
+          <label>쪽수 (선택)
+            <input type="number" id="quote-page" min="1" placeholder="예: 87">
+          </label>
+          <button type="submit" class="btn primary">문장 저장</button>
+        </form>
+      </div>
+      <div class="card">
+        <h2>모아둔 문장 <span class="sub" id="quote-count"></span></h2>
+        <div id="quote-list"></div>
+      </div>
+    </section>
+
+    <!-- 기록 탭 -->
+    <section id="tab-logs" class="tab">
+      <div class="card">
+        <h2>지난 기록</h2>
+        <div id="log-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 완독 질문 모달 -->
+  <div class="overlay" id="review-overlay">
+    <div class="modal">
+      <h2>🎉 완독을 축하해요!</h2>
+      <p class="modal-sub">읽은 책을 내 것으로 만드는 세 가지 질문이에요.<br>생각나는 것만 편하게 적어도 좋아요.</p>
+      <label>💬 가장 기억에 남는 한 문장은?
+        <textarea id="review-sentence" rows="2" placeholder="이 답은 '모아둔 문장'에도 자동 저장돼요"></textarea>
+      </label>
+      <label>🌱 이 책이 내 생각을 바꾼 부분이 있다면?
+        <textarea id="review-changed" rows="2"></textarea>
+      </label>
+      <label>✅ 이 책에서 얻은 것 중 실천해볼 것 하나는?
+        <textarea id="review-action" rows="2"></textarea>
+      </label>
+      <button class="btn primary" id="review-save">저장하고 완독 처리</button>
+      <button class="btn ghost" id="review-skip">건너뛰고 완독 처리</button>
+    </div>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="tab-home"><span class="nav-icon">🏠</span>홈</button>
+    <button class="nav-btn" data-tab="tab-books"><span class="nav-icon">📚</span>책장</button>
+    <button class="nav-btn" data-tab="tab-quotes"><span class="nav-icon">✍️</span>문장</button>
+    <button class="nav-btn" data-tab="tab-logs"><span class="nav-icon">📝</span>기록</button>
+  </nav>
+
+  <script src="quotes.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
