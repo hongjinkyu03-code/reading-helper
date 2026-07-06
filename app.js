@@ -791,6 +791,58 @@ document.getElementById("notify-test").addEventListener("click", async () => {
   showReadingNotification();
 });
 
+// ===== 진짜 푸시 알림 (앱이 닫혀 있어도 수신) =====
+// GitHub Actions가 매일 정해진 시간에 이 열쇠(공개키)로 서명된 푸시를 보내줍니다.
+// 폰에서 '연결하기'를 누르면 나오는 구독 코드를 비공개 저장소에 등록해야 완성돼요.
+const VAPID_PUBLIC_KEY = "BFvXwKWN0IysNTmk4TX89fH9SGJEZitR8OtHvcIrqbrYpXwhsjwHti-r03-QkjpH0cUcpk2usCBbsqEf9hDRvaA";
+
+// 푸시 구독에 필요한 형태(바이트 배열)로 공개키를 변환
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
+}
+
+const pushStatusEl = document.getElementById("push-status");
+
+document.getElementById("push-subscribe").addEventListener("click", async () => {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    pushStatusEl.textContent =
+      "⚠️ 이 브라우저에서는 푸시를 쓸 수 없어요. 아이폰이라면 사파리에서 '홈 화면에 추가'로 설치한 앱에서 눌러주세요. (iOS 16.4 이상)";
+    return;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      pushStatusEl.textContent = "⚠️ 알림 권한이 거부됐어요. 설정에서 이 앱의 알림을 허용해 주세요.";
+      return;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+    document.getElementById("push-json").value = JSON.stringify(sub.toJSON());
+    document.getElementById("push-result").classList.remove("hidden");
+    pushStatusEl.textContent = "✅ 구독 생성 완료! 위 코드를 복사해서 클로드에게 붙여넣어 주세요.";
+  } catch (e) {
+    pushStatusEl.textContent = "⚠️ 구독 생성 실패: " + e.message;
+  }
+});
+
+document.getElementById("push-copy").addEventListener("click", async () => {
+  const textarea = document.getElementById("push-json");
+  textarea.select();
+  try {
+    await navigator.clipboard.writeText(textarea.value);
+    pushStatusEl.textContent = "📋 복사됐어요! 클로드에게 붙여넣어 주세요.";
+  } catch (e) {
+    document.execCommand("copy"); // 구형 방식 (클립보드 API가 막힌 경우)
+    pushStatusEl.textContent = "📋 복사됐어요! 클로드에게 붙여넣어 주세요.";
+  }
+});
+
 // 30초마다 시간을 확인해서, 설정한 시간이 지났고 오늘 아직 안 보냈으면 알림 발송
 function checkNotification() {
   const s = state.settings;

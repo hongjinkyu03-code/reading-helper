@@ -3,7 +3,7 @@
 // 캐시 전략: "네트워크 우선" - 온라인이면 항상 최신 파일, 오프라인이면 저장본 사용
 importScripts("quotes.js"); // FAMOUS_QUOTES 명언 목록 공유
 
-const CACHE_NAME = "dokseo-v4";
+const CACHE_NAME = "dokseo-v5";
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./quotes.js", "./manifest.json"];
 
 self.addEventListener("install", event => {
@@ -73,6 +73,23 @@ async function maybeNotifyInBackground() {
     });
   }
 }
+
+// ===== 진짜 푸시 수신 (GitHub Actions가 보낸 알림) =====
+// 앱이 완전히 닫혀 있어도 이 이벤트는 실행됩니다
+self.addEventListener("push", event => {
+  let data = { title: "📖 오늘의 독서 시간이에요!", body: "책 한 페이지 어때요?" };
+  try {
+    if (event.data) data = event.data.json();
+  } catch (e) { /* 형식이 다르면 기본 문구 사용 */ }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "icon-192.png",
+      badge: "icon-192.png",
+      tag: "daily-reading",
+    })
+  );
+});
 
 self.addEventListener("periodicsync", event => {
   if (event.tag === "daily-reading-reminder") {

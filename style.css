@@ -437,6 +437,25 @@ form textarea {
 }
 .notify-status.on { color: #2f9e6e; font-weight: 600; }
 
+.soft-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0 12px;
+}
+#push-result { margin-top: 10px; }
+#push-result textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 0.75rem;
+  font-family: Consolas, monospace;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: #fdfcf9;
+  color: var(--ink);
+  word-break: break-all;
+  margin-bottom: 8px;
+}
+
 /* ===== 책 목록 ===== */
 .book-list .book-item {
   padding: 14px 0;
