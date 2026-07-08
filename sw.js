@@ -3,7 +3,7 @@
 // 캐시 전략: "네트워크 우선" - 온라인이면 항상 최신 파일, 오프라인이면 저장본 사용
 importScripts("quotes.js"); // FAMOUS_QUOTES 명언 목록 공유
 
-const CACHE_NAME = "dokseo-v5";
+const CACHE_NAME = "dokseo-v6";
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./quotes.js", "./manifest.json"];
 
 self.addEventListener("install", event => {
@@ -77,18 +77,32 @@ async function maybeNotifyInBackground() {
 // ===== 진짜 푸시 수신 (GitHub Actions가 보낸 알림) =====
 // 앱이 완전히 닫혀 있어도 이 이벤트는 실행됩니다
 self.addEventListener("push", event => {
-  let data = { title: "📖 오늘의 독서 시간이에요!", body: "책 한 페이지 어때요?" };
-  try {
-    if (event.data) data = event.data.json();
-  } catch (e) { /* 형식이 다르면 기본 문구 사용 */ }
-  event.waitUntil(
-    self.registration.showNotification(data.title, {
+  event.waitUntil((async () => {
+    let data = { title: "📖 오늘의 독서 시간이에요!", body: "책 한 페이지 어때요?" };
+    try {
+      if (event.data) data = event.data.json();
+    } catch (e) { /* 형식이 다르면 기본 문구 사용 */ }
+
+    // 밤 알림(스트릭 경고)은 폰에 저장된 기록을 확인해서,
+    // 오늘 이미 읽었으면 잔소리 대신 칭찬 메시지로 바꿔서 보여줌
+    if (data.slot === "night" && data.praise) {
+      try {
+        const stats = await idbGet("reading-stats");
+        const now = new Date();
+        const today = now.getFullYear() + "-" +
+          String(now.getMonth() + 1).padStart(2, "0") + "-" +
+          String(now.getDate()).padStart(2, "0");
+        if (stats && stats.lastLogDate === today) data = data.praise;
+      } catch (e) { /* 기록을 못 읽으면 원래 메시지 그대로 */ }
+    }
+
+    await self.registration.showNotification(data.title, {
       body: data.body,
       icon: "icon-192.png",
       badge: "icon-192.png",
       tag: "daily-reading",
-    })
-  );
+    });
+  })());
 });
 
 self.addEventListener("periodicsync", event => {

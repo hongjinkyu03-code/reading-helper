@@ -496,6 +496,11 @@ function renderStats() {
     .filter(l => l.date === todayStr())
     .reduce((sum, l) => sum + (l.pages || 0), 0);
   document.getElementById("today-pages").textContent = todayPages;
+
+  // 백그라운드 알림(서비스 워커)이 '오늘 읽었는지' 알 수 있게 요약을 IndexedDB에 저장
+  // → 밤 스트릭 경고 알림이 이미 읽은 날에는 칭찬으로 바뀜
+  const lastLogDate = state.logs.reduce((max, l) => (l.date > max ? l.date : max), "");
+  idbSet("reading-stats", { lastLogDate, streak }).catch(() => {});
 }
 
 // 홈의 기록 폼: "읽는 중"인 책만 선택 목록에 표시
