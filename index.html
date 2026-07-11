@@ -97,6 +97,12 @@
       </div>
 
       <div class="card">
+        <h2>📤 독서 리포트 공유</h2>
+        <p class="notify-desc">이번 주 독서 현황을 이미지 카드로 만들어 친구에게 자랑해 보세요!</p>
+        <button class="btn primary" id="share-make">리포트 이미지 만들기</button>
+      </div>
+
+      <div class="card">
         <h2>⏰ 독서 알림</h2>
         <p class="notify-desc">매일 정한 시간에 유명한 책 구절과 함께 독서 알림을 보내드려요.</p>
         <div class="notify-row">
@@ -211,6 +217,18 @@
       </label>
       <button class="btn primary" id="review-save">저장하고 완독 처리</button>
       <button class="btn ghost" id="review-skip">건너뛰고 완독 처리</button>
+    </div>
+  </div>
+
+  <!-- 공유 이미지 미리보기 모달 -->
+  <div class="overlay" id="share-overlay">
+    <div class="modal">
+      <h2>📤 나의 독서 리포트</h2>
+      <p class="modal-sub">아래 이미지를 공유하거나 저장할 수 있어요.</p>
+      <img id="share-preview" class="share-preview" alt="독서 리포트 미리보기">
+      <button class="btn primary" id="share-send">공유하기</button>
+      <button class="btn ghost" id="share-download">이미지로 저장</button>
+      <button class="btn ghost" id="share-close">닫기</button>
     </div>
   </div>
 

@@ -3,7 +3,7 @@
 // 캐시 전략: "네트워크 우선" - 온라인이면 항상 최신 파일, 오프라인이면 저장본 사용
 importScripts("quotes.js"); // FAMOUS_QUOTES 명언 목록 공유
 
-const CACHE_NAME = "dokseo-v6";
+const CACHE_NAME = "dokseo-v7";
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./quotes.js", "./manifest.json"];
 
 self.addEventListener("install", event => {

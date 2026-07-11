@@ -476,13 +476,11 @@ function renderBalance() {
   el.innerHTML = `<div class="balance-bar">${bar}</div><div class="balance-legend">${legend}</div>${tip}`;
 }
 
-// 연속 기록(스트릭) + 오늘 읽은 쪽수
-function renderStats() {
+// 오늘부터 거꾸로 세면서 기록이 있는 날이 며칠 연속인지 계산
+// (오늘 아직 기록 안 했으면 어제부터 세어줌 - 아직 스트릭이 깨진 게 아니니까)
+function calcStreak() {
   const byDate = {};
   state.logs.forEach(l => { byDate[l.date] = true; });
-
-  // 오늘부터 거꾸로 세면서 기록이 있는 날이 며칠 연속인지 계산
-  // (오늘 아직 기록 안 했으면 어제부터 세어줌 - 아직 스트릭이 깨진 게 아니니까)
   let streak = 0;
   const cursor = new Date();
   if (!byDate[dateStr(cursor)]) cursor.setDate(cursor.getDate() - 1);
@@ -490,6 +488,12 @@ function renderStats() {
     streak++;
     cursor.setDate(cursor.getDate() - 1);
   }
+  return streak;
+}
+
+// 연속 기록(스트릭) + 오늘 읽은 쪽수
+function renderStats() {
+  const streak = calcStreak();
   document.getElementById("streak-value").textContent = streak;
 
   const todayPages = state.logs
@@ -664,6 +668,210 @@ function escapeHtml(str) {
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
+
+// ===== 독서 리포트 공유 이미지 =====
+// 캔버스에 리포트 카드를 그려서 PNG 이미지로 만듭니다
+let shareBlob = null; // 만들어진 이미지 데이터 (공유/저장에 사용)
+
+// 모서리가 둥근 사각형 그리기
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// 긴 문장을 폭에 맞게 여러 줄로 자르기 (한글은 띄어쓰기가 애매해서 글자 단위로)
+function wrapText(ctx, text, maxWidth, maxLines) {
+  const lines = [];
+  let line = "";
+  for (const ch of text) {
+    if (ctx.measureText(line + ch).width > maxWidth) {
+      lines.push(line);
+      line = ch;
+      if (lines.length === maxLines) {
+        lines[maxLines - 1] = lines[maxLines - 1].slice(0, -1) + "…";
+        return lines;
+      }
+    } else {
+      line += ch;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function buildReportCanvas() {
+  const W = 1080, H = 1350;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const FONT = '"Pretendard", "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+
+  // 배경
+  ctx.fillStyle = "#f7f4ee";
+  ctx.fillRect(0, 0, W, H);
+
+  // 제목 + 날짜
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#7c3f16";
+  ctx.font = "bold 62px " + FONT;
+  ctx.fillText("📖 나의 독서 리포트", W / 2, 120);
+  ctx.fillStyle = "#8b8577";
+  ctx.font = "34px " + FONT;
+  ctx.fillText(new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" }), W / 2, 178);
+
+  // 통계 카드 3개: 스트릭 / 이번 주 쪽수 / 완독 권수
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 6);
+  const weekAgoStr = dateStr(weekAgo);
+  const weekPages = state.logs
+    .filter(l => l.date >= weekAgoStr)
+    .reduce((sum, l) => sum + (l.pages || 0), 0);
+  const stats = [
+    { num: calcStreak(), label: "🔥 연속 기록 (일)" },
+    { num: weekPages, label: "이번 주 읽은 쪽수" },
+    { num: state.books.filter(b => b.status === "done").length, label: "완독한 책 (권)" },
+  ];
+  stats.forEach((s, i) => {
+    const cw = 300, x = 60 + i * (cw + 30), y = 230;
+    ctx.fillStyle = "#ffffff";
+    roundRect(ctx, x, y, cw, 190, 24);
+    ctx.fill();
+    ctx.fillStyle = "#a3541f";
+    ctx.font = "bold 76px " + FONT;
+    ctx.fillText(String(s.num), x + cw / 2, y + 105);
+    ctx.fillStyle = "#8b8577";
+    ctx.font = "28px " + FONT;
+    ctx.fillText(s.label, x + cw / 2, y + 158);
+  });
+
+  // 잔디밭 (최근 16주)
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#32302b";
+  ctx.font = "bold 38px " + FONT;
+  ctx.fillText("독서 잔디밭", 128, 530);
+  ctx.fillStyle = "#8b8577";
+  ctx.font = "26px " + FONT;
+  ctx.fillText("최근 16주", 350, 530);
+
+  const activity = {};
+  state.logs.forEach(l => {
+    activity[l.date] = (activity[l.date] || 0) + (l.pages || 0) + (l.minutes || 0);
+  });
+  const GREEN = ["#edeae1", "#c6e48b", "#7bc96f", "#239a3b", "#196127"];
+  const today = new Date();
+  const WEEKS = 16, CELL = 44, GAP = 8;
+  const gridX = (W - (WEEKS * (CELL + GAP) - GAP)) / 2;
+  const gridY = 570;
+  const start = new Date(today);
+  start.setDate(today.getDate() - today.getDay() - (WEEKS - 1) * 7);
+  const cursor = new Date(start);
+  const todayS = todayStr();
+  let col = 0, row = 0;
+  while (dateStr(cursor) <= todayS) {
+    const amount = activity[dateStr(cursor)] || 0;
+    let level = 0;
+    if (amount >= 60) level = 4;
+    else if (amount >= 40) level = 3;
+    else if (amount >= 20) level = 2;
+    else if (amount >= 1) level = 1;
+    ctx.fillStyle = GREEN[level];
+    roundRect(ctx, gridX + col * (CELL + GAP), gridY + row * (CELL + GAP), CELL, CELL, 9);
+    ctx.fill();
+    row++;
+    if (row === 7) { row = 0; col++; }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  // 지금 읽는 책 (최대 2권)
+  const reading = state.books.filter(b => b.status === "reading").slice(0, 2);
+  ctx.fillStyle = "#32302b";
+  ctx.font = "bold 38px " + FONT;
+  ctx.fillText("지금 읽는 책", 128, 1010);
+  ctx.font = "34px " + FONT;
+  if (reading.length === 0) {
+    ctx.fillStyle = "#8b8577";
+    ctx.fillText("다음에 읽을 책을 고르는 중이에요 📚", 128, 1065);
+  } else {
+    reading.forEach((b, i) => {
+      const y = 1065 + i * 56;
+      ctx.fillStyle = genreColor(b.genre);
+      ctx.beginPath();
+      ctx.arc(140, y - 11, 11, 0, Math.PI * 2);
+      ctx.fill();
+      const readPages = state.logs.filter(l => l.bookId === b.id).reduce((s, l) => s + (l.pages || 0), 0);
+      const pct = b.totalPages ? ` · ${Math.min(100, Math.round(readPages / b.totalPages * 100))}%` : "";
+      ctx.fillStyle = "#32302b";
+      const title = wrapText(ctx, b.title, 700, 1)[0];
+      ctx.fillText(`${title}${pct}`, 172, y);
+    });
+  }
+
+  // 오늘의 문장 상자
+  const pool = state.quotes.length > 0 ? state.quotes : FAMOUS_QUOTES;
+  let h = 0;
+  for (const ch of todayStr()) h += ch.charCodeAt(0);
+  const q = pool[h % pool.length];
+  const qText = q.text;
+  const qBy = state.quotes.length > 0 ? quoteSource(q) : q.by;
+  ctx.fillStyle = "#f7e8d8";
+  roundRect(ctx, 60, 1180, W - 120, 140, 24);
+  ctx.fill();
+  ctx.fillStyle = "#7c3f16";
+  ctx.font = "italic 30px " + FONT;
+  const qLines = wrapText(ctx, "“" + qText + "”", W - 220, 2);
+  qLines.forEach((line, i) => ctx.fillText(line, 100, 1230 + i * 42));
+  ctx.fillStyle = "#a3541f";
+  ctx.font = "26px " + FONT;
+  ctx.textAlign = "right";
+  ctx.fillText("— " + qBy, W - 100, 1300);
+
+  // 하단 서명
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#c4bcab";
+  ctx.font = "24px " + FONT;
+  ctx.fillText("독서 도우미와 함께", W / 2, H - 14);
+
+  return canvas;
+}
+
+document.getElementById("share-make").addEventListener("click", async () => {
+  const canvas = buildReportCanvas();
+  document.getElementById("share-preview").src = canvas.toDataURL("image/png");
+  shareBlob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+  document.getElementById("share-overlay").classList.add("show");
+});
+
+document.getElementById("share-send").addEventListener("click", async () => {
+  if (!shareBlob) return;
+  const file = new File([shareBlob], "독서리포트.png", { type: "image/png" });
+  // 폰이라면 카톡/인스타 등으로 바로 공유하는 창이 뜸
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: "나의 독서 리포트" });
+    } catch (e) { /* 사용자가 공유 창을 닫은 경우 - 무시 */ }
+  } else {
+    alert("이 브라우저는 바로 공유를 지원하지 않아요. '이미지로 저장'을 이용해 주세요.");
+  }
+});
+
+document.getElementById("share-download").addEventListener("click", () => {
+  if (!shareBlob) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(shareBlob);
+  a.download = "독서리포트.png";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+document.getElementById("share-close").addEventListener("click", () => {
+  document.getElementById("share-overlay").classList.remove("show");
+});
 
 // ===== IndexedDB 도우미 =====
 // localStorage는 서비스 워커(백그라운드)가 읽을 수 없어서,

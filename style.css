@@ -395,6 +395,15 @@ form textarea {
   margin: 8px 0 18px;
 }
 
+/* ===== 공유 리포트 ===== */
+.share-preview {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-bottom: 14px;
+}
+
 /* ===== 완독 기록(독후 답변) 표시 ===== */
 .review-box {
   margin-top: 10px;
