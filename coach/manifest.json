@@ -1,0 +1,14 @@
+{
+  "name": "글쓰기·말하기 마스터 코치",
+  "short_name": "글말 코치",
+  "description": "언어학·교육심리학·수사학에 근거해 매일 과제와 피드백을 주는 글쓰기·말하기 코치",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f5fb",
+  "theme_color": "#4338ca",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

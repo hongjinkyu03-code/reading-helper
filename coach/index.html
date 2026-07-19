@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#4338ca">
+  <title>글쓰기·말하기 코치</title>
+  <meta name="description" content="언어학·교육심리학·수사학에 근거해 매일 과제와 피드백을 주는 글쓰기·말하기 코치">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="coach.css">
+  <link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+  <header class="app-header">
+    <h1>✍️ 마스터 코치</h1>
+    <span id="header-day"></span>
+  </header>
+
+  <main>
+    <!-- ===================== 오늘 탭 (세션) ===================== -->
+    <section id="tab-today" class="tab active">
+      <div id="session-root"><!-- coach.js 가 세션 단계별 화면을 렌더링 --></div>
+    </section>
+
+    <!-- ===================== 진도 탭 ===================== -->
+    <section id="tab-progress" class="tab">
+      <div class="stat-row">
+        <div class="card stat-card">
+          <div class="stat-value" id="stat-day">0</div>
+          <div class="stat-label">진행한 Day</div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-value" id="stat-streak">0</div>
+          <div class="stat-label">🔥 연속 (일)</div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-value" id="stat-done">0</div>
+          <div class="stat-label">완료 세션</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🎯 나의 목표</h2>
+        <p id="progress-goals" class="muted">아직 목표를 설정하지 않았어요.</p>
+        <button class="btn ghost small" id="edit-goals">목표 수정</button>
+      </div>
+
+      <div class="card">
+        <h2>💪 기술별 성장 <span class="sub">스스로 평가 기준</span></h2>
+        <div id="skill-grid"></div>
+        <p class="legend">
+          <i class="dot d-weak"></i> 더 필요
+          <i class="dot d-mid"></i> 그럭저럭
+          <i class="dot d-strong"></i> 편해짐
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>📅 연습 잔디밭 <span class="sub">최근 12주</span></h2>
+        <div id="heatmap" class="heatmap"></div>
+      </div>
+
+      <div class="card" id="weekly-review-card" style="display:none">
+        <h2>🗓️ 주간 성장 리뷰</h2>
+        <div id="weekly-review-body"></div>
+      </div>
+    </section>
+
+    <!-- ===================== 기록 탭 ===================== -->
+    <section id="tab-log" class="tab">
+      <div class="card">
+        <h2>📚 지난 세션</h2>
+        <p class="muted small">과제 원본과 재도전을 다시 열어볼 수 있어요. 첫 주에 쓴 글을 나중에 다시 고쳐 쓰면 성장이 보입니다.</p>
+        <div id="log-list"></div>
+      </div>
+    </section>
+
+    <!-- ===================== 설정 탭 ===================== -->
+    <section id="tab-settings" class="tab">
+      <div class="card">
+        <h2>🤖 AI 코치 피드백 <span class="sub">선택</span></h2>
+        <p class="muted small">
+          이 앱은 AI 없이도 완전히 동작해요(스스로 발견하는 자기 주목 방식). 여기에 본인의
+          <b>Anthropic API 키</b>를 넣으면, 제출한 글에 대해 코칭 프롬프트 그대로의 진짜 피드백을 받을 수 있어요.
+          키는 이 기기(브라우저)에만 저장되며 서버로 보내지 않습니다.
+        </p>
+        <label>Anthropic API 키
+          <input type="password" id="set-apikey" placeholder="sk-ant-...">
+        </label>
+        <label>모델
+          <select id="set-model">
+            <option value="claude-sonnet-5">Claude Sonnet 5 (권장·균형)</option>
+            <option value="claude-opus-4-8">Claude Opus 4.8 (가장 정교)</option>
+            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (빠름·저렴)</option>
+          </select>
+        </label>
+        <label class="row-check">
+          <input type="checkbox" id="set-ai-enabled"> AI 피드백 사용
+        </label>
+        <button class="btn primary" id="save-settings">저장</button>
+        <button class="btn ghost small" id="test-ai">연결 테스트</button>
+        <p id="ai-status" class="notify-status"></p>
+      </div>
+
+      <div class="card">
+        <h2>💾 데이터</h2>
+        <p class="muted small">모든 기록은 이 기기에만 저장됩니다.</p>
+        <button class="btn ghost small" id="export-data">기록 내보내기(JSON)</button>
+        <button class="btn ghost small danger" id="reset-data">전체 초기화</button>
+      </div>
+
+      <div class="card">
+        <h2>ℹ️ 코칭 원리</h2>
+        <p class="muted small">
+          의도적 연습(Ericsson) · 근접발달영역(Vygotsky) · 형성평가 피드백(Hattie&amp;Timperley) ·
+          산출 가설(Swain) · 주목 가설(Schmidt) · 인출/간격 반복(Roediger&amp;Karpicke) ·
+          인지부하 관리(Sweller) · 성장 마인드셋(Dweck).
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="tab-today"><span class="nav-icon">📝</span>오늘</button>
+    <button class="nav-btn" data-tab="tab-progress"><span class="nav-icon">📈</span>진도</button>
+    <button class="nav-btn" data-tab="tab-log"><span class="nav-icon">📚</span>기록</button>
+    <button class="nav-btn" data-tab="tab-settings"><span class="nav-icon">⚙️</span>설정</button>
+  </nav>
+
+  <script src="curriculum.js"></script>
+  <script src="coach.js"></script>
+</body>
+</html>

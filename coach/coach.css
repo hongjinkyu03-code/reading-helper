@@ -1,0 +1,221 @@
+/* ============================================================
+ * coach.css — 글쓰기·말하기 코치 (인디고 계열, 모바일 우선 PWA)
+ * ========================================================== */
+:root{
+  --bg:#f4f5fb;
+  --card:#ffffff;
+  --ink:#1e2033;
+  --muted:#6b6f86;
+  --line:#e6e7f0;
+  --primary:#4338ca;
+  --primary-soft:#eef0fd;
+  --accent:#0e9488;
+  --danger:#c0392b;
+  --good:#16a34a;
+  --warn:#d97706;
+  --radius:16px;
+  --shadow:0 2px 10px rgba(40,42,80,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",
+    "Malgun Gothic",sans-serif;
+  background:var(--bg); color:var(--ink);
+  line-height:1.65; -webkit-font-smoothing:antialiased;
+  padding-bottom:calc(72px + env(safe-area-inset-bottom));
+}
+
+/* ---------- 헤더 ---------- */
+.app-header{
+  position:sticky; top:0; z-index:20;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:calc(12px + env(safe-area-inset-top)) 18px 12px;
+  background:linear-gradient(135deg,#4338ca,#5b52e0);
+  color:#fff; box-shadow:0 2px 12px rgba(67,56,202,.25);
+}
+.app-header h1{font-size:19px; margin:0; font-weight:800; letter-spacing:-.3px}
+#header-day{font-size:13px; font-weight:700; opacity:.92; background:rgba(255,255,255,.16);
+  padding:4px 10px; border-radius:999px}
+
+main{max-width:640px; margin:0 auto; padding:16px 14px 24px}
+
+/* ---------- 탭 ---------- */
+.tab{display:none; animation:fade .25s ease}
+.tab.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ---------- 카드 ---------- */
+.card{
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px 16px; margin-bottom:14px; box-shadow:var(--shadow);
+}
+.card h2{font-size:16px; margin:0 0 10px; font-weight:800; letter-spacing:-.2px}
+.card h2 .sub{font-size:11px; font-weight:600; color:var(--muted); margin-left:6px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.muted.small{font-size:13px; line-height:1.6}
+
+/* ---------- 통계 ---------- */
+.stat-row{display:flex; gap:10px; margin-bottom:14px}
+.stat-card{flex:1; text-align:center; padding:16px 8px}
+.stat-value{font-size:28px; font-weight:800; color:var(--primary); line-height:1}
+.stat-label{font-size:12px; color:var(--muted); margin-top:6px}
+
+/* ---------- 세션 화면 ---------- */
+.session-step{animation:fade .25s ease}
+.step-kicker{
+  display:inline-flex; align-items:center; gap:6px;
+  font-size:12px; font-weight:800; color:var(--primary);
+  background:var(--primary-soft); padding:5px 12px; border-radius:999px; margin-bottom:12px;
+}
+.step-kicker.speak{color:#0e7c73; background:#e2f6f3}
+.step-kicker.review{color:#b45309; background:#fdf1df}
+.recall-line{
+  font-size:13px; color:var(--muted); background:#fafbff; border:1px dashed var(--line);
+  border-radius:12px; padding:9px 12px; margin-bottom:14px;
+}
+.recall-line b{color:var(--ink)}
+.goal-box{
+  border-left:4px solid var(--primary); background:var(--primary-soft);
+  padding:12px 14px; border-radius:0 12px 12px 0; margin-bottom:14px;
+}
+.goal-box .lbl{font-size:11px; font-weight:800; color:var(--primary); letter-spacing:.4px}
+.goal-box p{margin:4px 0 0; font-weight:700; font-size:15px}
+
+.section-label{font-size:12px; font-weight:800; color:var(--muted); letter-spacing:.3px;
+  text-transform:uppercase; margin:16px 0 6px}
+.why-text{font-size:14px; color:#40435c}
+
+.example-pair{display:grid; gap:8px; margin:10px 0}
+.ex{border-radius:12px; padding:10px 12px; font-size:14px}
+.ex .tag{font-size:11px; font-weight:800; display:block; margin-bottom:3px}
+.ex.bad{background:#fdf0ee; border:1px solid #f6d9d3} .ex.bad .tag{color:var(--danger)}
+.ex.good{background:#eaf7ef; border:1px solid #cdeed9} .ex.good .tag{color:var(--good)}
+
+.lesson-text{font-size:14.5px; color:#33364d; background:#fbfbfe;
+  border:1px solid var(--line); border-radius:12px; padding:12px 14px}
+
+.task-box{border:2px solid var(--primary); border-radius:14px; padding:14px; margin-top:8px;
+  background:#fff}
+.task-box .task-title{font-weight:800; color:var(--primary); margin-bottom:6px}
+.constraints{list-style:none; margin:10px 0 0; padding:0}
+.constraints li{font-size:13.5px; padding:6px 10px 6px 30px; position:relative;
+  background:#f6f7fe; border-radius:10px; margin-bottom:6px}
+.constraints li::before{content:"✓"; position:absolute; left:11px; color:var(--primary);
+  font-weight:800}
+.time-pill{display:inline-block; font-size:12px; color:var(--muted); margin-top:10px}
+
+.topic-highlight{background:#fff7e6; border:1px solid #ffe2a8; border-radius:12px;
+  padding:12px 14px; font-weight:700; font-size:15px; margin:10px 0}
+
+/* ---------- 폼 ---------- */
+label{display:block; font-size:13.5px; font-weight:600; color:#3a3d55; margin-top:12px}
+input[type=text],input[type=password],input[type=number],select,textarea{
+  width:100%; margin-top:5px; padding:11px 12px; font-size:15px; font-family:inherit;
+  border:1px solid var(--line); border-radius:11px; background:#fff; color:var(--ink);
+}
+textarea{resize:vertical; line-height:1.6}
+input:focus,textarea:focus,select:focus{outline:none; border-color:var(--primary);
+  box-shadow:0 0 0 3px rgba(67,56,202,.12)}
+.char-count{text-align:right; font-size:12px; color:var(--muted); margin-top:4px}
+.char-count.over{color:var(--danger); font-weight:700}
+.row-check{display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:600}
+.row-check input{width:auto; margin:0}
+
+/* ---------- 버튼 ---------- */
+.btn{display:inline-block; border:none; border-radius:12px; font-family:inherit;
+  font-size:15px; font-weight:700; padding:12px 18px; cursor:pointer; margin-top:12px;
+  transition:transform .08s ease, opacity .15s}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--primary); color:#fff; width:100%}
+.btn.ghost{background:#f0f1f9; color:var(--primary)}
+.btn.ghost.danger{color:var(--danger); background:#fdecea}
+.btn.small{font-size:13px; padding:8px 14px; width:auto; margin-right:8px}
+.btn.block{width:100%}
+.btn:disabled{opacity:.5; cursor:default}
+.btn-secondary{background:var(--accent); color:#fff}
+
+/* ---------- 피드백 ---------- */
+.fb-block{margin-top:12px; border-radius:12px; padding:12px 14px; font-size:14.5px}
+.fb-praise{background:#eef8f1; border:1px solid #cdeed9}
+.fb-praise .fb-h{color:var(--good)}
+.fb-improve{background:#fff7ec; border:1px solid #ffe2b0}
+.fb-improve .fb-h{color:var(--warn)}
+.fb-h{font-weight:800; font-size:12px; letter-spacing:.3px; margin-bottom:6px; display:block}
+.notice-q{background:var(--primary-soft); border:1px dashed #c3c0f0; border-radius:12px;
+  padding:12px 14px; margin-top:10px; font-weight:600; color:#2f2b6b}
+.ba-pair{display:grid; gap:8px; margin-top:10px}
+.ai-answer{white-space:pre-wrap; font-size:14.5px; background:#fbfbfe; border:1px solid var(--line);
+  border-radius:12px; padding:14px}
+.spinner{display:inline-block; width:16px; height:16px; border:2px solid #c9c9e6;
+  border-top-color:var(--primary); border-radius:50%; animation:spin .7s linear infinite;
+  vertical-align:-3px; margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- 타이머 (말하기) ---------- */
+.timer-wrap{text-align:center; margin:14px 0}
+.timer-phase{font-size:13px; font-weight:800; color:var(--accent); letter-spacing:.4px}
+.timer-display{font-size:52px; font-weight:800; letter-spacing:1px; margin:6px 0;
+  font-variant-numeric:tabular-nums; color:var(--ink)}
+.timer-display.prep{color:var(--warn)}
+.timer-display.done{color:var(--good)}
+.timer-controls{display:flex; gap:8px; justify-content:center}
+
+/* ---------- 기술 그리드 / 진도 ---------- */
+#skill-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+.skill-chip{border:1px solid var(--line); border-radius:12px; padding:9px 11px; font-size:13px;
+  display:flex; align-items:center; justify-content:space-between; background:#fff}
+.skill-chip .sname{font-weight:600}
+.skill-chip .dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:5px}
+.d-weak{background:#e11d48} .d-mid{background:#d97706} .d-strong{background:#16a34a}
+.d-none{background:#cfd2e2}
+.legend{font-size:12px; color:var(--muted); margin-top:12px; display:flex; gap:14px; align-items:center}
+.legend .dot{margin-right:4px}
+
+/* ---------- 히트맵 ---------- */
+.heatmap{display:grid; grid-template-columns:repeat(12,1fr); gap:4px}
+.heatmap .cell{aspect-ratio:1; border-radius:3px; background:#e9eaf3}
+.heatmap .cell.l1{background:#c7c3f2} .heatmap .cell.l2{background:#9a92ea}
+.heatmap .cell.l3{background:#6b5fe0} .heatmap .cell.l4{background:#4338ca}
+
+/* ---------- 기록 리스트 ---------- */
+.log-item{border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px;
+  background:#fff}
+.log-item .lh{display:flex; justify-content:space-between; align-items:center; gap:8px}
+.log-item .lday{font-weight:800; color:var(--primary); font-size:14px}
+.log-item .ldate{font-size:12px; color:var(--muted)}
+.log-item .lskill{font-size:13px; color:#40435c; margin-top:4px}
+.log-item .lbody{font-size:13.5px; white-space:pre-wrap; margin-top:8px; color:#33364d;
+  max-height:0; overflow:hidden; transition:max-height .25s ease}
+.log-item.open .lbody{max-height:1400px}
+.track-badge{font-size:11px; font-weight:800; padding:2px 8px; border-radius:999px}
+.tb-write{background:var(--primary-soft); color:var(--primary)}
+.tb-speak{background:#e2f6f3; color:#0e7c73}
+.tb-review{background:#fdf1df; color:#b45309}
+
+/* ---------- 진단/온보딩 ---------- */
+.welcome h2{font-size:20px}
+.welcome .lead{font-size:15px; color:#40435c}
+.pill-hint{font-size:12.5px; color:var(--muted); margin-top:6px}
+
+.notify-status{font-size:13px; margin-top:10px; min-height:18px}
+.notify-status.ok{color:var(--good)} .notify-status.err{color:var(--danger)}
+hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
+.empty-msg{text-align:center; color:var(--muted); padding:20px 0; font-size:14px}
+
+/* ---------- 하단 네비 ---------- */
+.bottom-nav{
+  position:fixed; left:0; right:0; bottom:0; z-index:30;
+  display:flex; background:rgba(255,255,255,.96); backdrop-filter:blur(10px);
+  border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.nav-btn{flex:1; background:none; border:none; padding:9px 0 8px; font-family:inherit;
+  font-size:11px; font-weight:700; color:var(--muted); cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; gap:2px}
+.nav-btn .nav-icon{font-size:20px}
+.nav-btn.active{color:var(--primary)}
+
+@media (max-width:360px){ #skill-grid{grid-template-columns:1fr} }
