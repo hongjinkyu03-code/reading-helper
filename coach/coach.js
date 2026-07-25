@@ -34,7 +34,12 @@
       lastWeeklyReviewDay: 0,
       practices: [],          // 실전 말하기 연습 기록
       activePractice: null,   // 진행 중 실전 연습
-      settings: { apiKey: "", model: "claude-sonnet-5", aiEnabled: false }
+      settings: {
+        aiEnabled: false,
+        provider: "gemini",   // 'gemini'(무료) | 'anthropic'(유료)
+        gemini: { key: "", model: "gemini-2.5-flash" },
+        anthropic: { key: "", model: "claude-sonnet-5" }
+      }
     };
   }
   let state = load();
@@ -42,8 +47,19 @@
     try {
       const raw = localStorage.getItem(LS_KEY);
       if (!raw) return defaultState();
-      return Object.assign(defaultState(), JSON.parse(raw));
+      const s = Object.assign(defaultState(), JSON.parse(raw));
+      normalizeSettings(s);
+      return s;
     } catch (e) { return defaultState(); }
+  }
+  /* 예전(단일 Anthropic) 설정을 새 제공자별 구조로 이관 */
+  function normalizeSettings(s) {
+    const set = s.settings = s.settings || {};
+    if (typeof set.aiEnabled !== "boolean") set.aiEnabled = false;
+    if (!set.provider) set.provider = "gemini";
+    if (!set.gemini) set.gemini = { key: "", model: "gemini-2.5-flash" };
+    if (!set.anthropic) set.anthropic = { key: set.apiKey || "", model: set.model || "claude-sonnet-5" };
+    delete set.apiKey; delete set.model;
   }
   function save() { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 
@@ -512,7 +528,7 @@
 
   /* ---- feedback ---- */
   function viewFeedback(sess, L) {
-    const useAI = state.settings.aiEnabled && state.settings.apiKey;
+    const useAI = aiReady();
     const observation = localObservation(L, sess.submission);
     const aiSlot = useAI
       ? `<div class="fb-block fb-improve"><span class="fb-h">🤖 AI 코치 피드백</span>
@@ -550,7 +566,7 @@
   function wireFeedback(sess, L) {
     $("#to-retry").addEventListener("click", () => { sess.stage = "retry"; save(); renderToday(); });
     $("#skip-retry").addEventListener("click", () => { sess.stage = "wrap"; save(); renderToday(); });
-    if (state.settings.aiEnabled && state.settings.apiKey) {
+    if (aiReady()) {
       if (sess.aiFeedback) { const el = $("#ai-fb"); if (el) el.innerHTML = esc(sess.aiFeedback); }
       else requestAIFeedback(sess, L, sess.submission, "first");
     }
@@ -570,7 +586,7 @@
         <textarea id="retry-text" rows="6" placeholder="피드백을 반영해 해당 부분만 다시 써 보세요">${esc(sess.retry)}</textarea>
       </label>
       <button class="btn primary" id="retry-submit">재도전 제출</button>
-      ${state.settings.aiEnabled && state.settings.apiKey ? `<div id="ai-retry-slot"></div>` : ""}
+      ${aiReady() ? `<div id="ai-retry-slot"></div>` : ""}
     </div>`;
   }
   function wireRetry(sess, L) {
@@ -793,15 +809,38 @@
   }
 
   /* ============================ 설정 탭 ============================ */
+  let uiProvider = "gemini";
+  function refreshProviderUI() {
+    const p = $("#set-provider").value;
+    const sel = $("#set-model");
+    sel.innerHTML = AI_MODELS[p].map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
+    const cfg = state.settings[p] || {};
+    sel.value = cfg.model || AI_MODELS[p][0][0];
+    const key = $("#set-apikey");
+    key.value = cfg.key || "";
+    key.placeholder = KEY_PLACEHOLDER[p];
+    $("#key-help").textContent = KEY_HELP[p];
+  }
+  function persistForm(p) {
+    const cfg = state.settings[p] || (state.settings[p] = {});
+    cfg.key = $("#set-apikey").value.trim();
+    cfg.model = $("#set-model").value;
+  }
   function renderSettings() {
-    $("#set-apikey").value = state.settings.apiKey || "";
-    $("#set-model").value = state.settings.model || "claude-sonnet-5";
+    uiProvider = state.settings.provider || "gemini";
+    $("#set-provider").value = uiProvider;
+    refreshProviderUI();
     $("#set-ai-enabled").checked = !!state.settings.aiEnabled;
   }
   function wireSettingsOnce() {
+    $("#set-provider").addEventListener("change", () => {
+      persistForm(uiProvider);            // 떠나는 제공자에 현재 입력 보존
+      uiProvider = $("#set-provider").value;
+      refreshProviderUI();
+    });
     $("#save-settings").addEventListener("click", () => {
-      state.settings.apiKey = $("#set-apikey").value.trim();
-      state.settings.model = $("#set-model").value;
+      persistForm(uiProvider);
+      state.settings.provider = uiProvider;
       state.settings.aiEnabled = $("#set-ai-enabled").checked;
       save();
       setStatus("#ai-status", "저장했어요.", "ok");
@@ -850,17 +889,70 @@ ${text}
 위 제출에 대해 규칙에 따라 피드백해 주세요. 오늘 기술(${L.skill})에만 집중하세요.`;
   }
 
-  async function callAnthropic2(system, userMsg) {
+  /* ---- 제공자 공통 헬퍼 ---- */
+  const AI_MODELS = {
+    gemini: [
+      ["gemini-2.5-flash", "Gemini 2.5 Flash (권장 · 무료)"],
+      ["gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite (가장 빠름 · 무료)"],
+      ["gemini-2.0-flash", "Gemini 2.0 Flash (무료)"]
+    ],
+    anthropic: [
+      ["claude-sonnet-5", "Claude Sonnet 5 (유료)"],
+      ["claude-opus-4-8", "Claude Opus 4.8 (유료)"],
+      ["claude-haiku-4-5-20251001", "Claude Haiku 4.5 (유료)"]
+    ]
+  };
+  const KEY_HELP = {
+    gemini: "무료 키 발급 → Google AI Studio (aistudio.google.com/apikey) 접속 후 “Create API key”. 신용카드 없이 발급됩니다.",
+    anthropic: "키 발급 → console.anthropic.com (사용량에 따라 과금)"
+  };
+  const KEY_PLACEHOLDER = { gemini: "AIza…", anthropic: "sk-ant-…" };
+
+  function aiCfg() { return state.settings[state.settings.provider] || {}; }
+  function currentKey() { return (aiCfg().key || "").trim(); }
+  function currentModel() { return aiCfg().model; }
+  function aiReady() { return !!(state.settings.aiEnabled && currentKey()); }
+
+  function callAI(system, userMsg) {
+    return state.settings.provider === "anthropic"
+      ? callAnthropic(system, userMsg)
+      : callGemini(system, userMsg);
+  }
+
+  async function callGemini(system, userMsg) {
+    const model = currentModel() || "gemini-2.5-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(currentKey())}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: userMsg }] }],
+        generationConfig: { maxOutputTokens: 1024, temperature: 0.7 }
+      })
+    });
+    if (!res.ok) {
+      let detail = ""; try { detail = (await res.json()).error?.message || ""; } catch (e) {}
+      throw new Error(`${res.status} ${detail || "요청 실패"}`);
+    }
+    const data = await res.json();
+    const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+    const text = parts.map(p => p.text || "").join("").trim();
+    if (!text) throw new Error(data.promptFeedback ? "안전 필터로 응답이 차단됐어요" : "빈 응답");
+    return text;
+  }
+
+  async function callAnthropic(system, userMsg) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": state.settings.apiKey,
+        "x-api-key": currentKey(),
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model: state.settings.model || "claude-sonnet-5",
+        model: currentModel() || "claude-sonnet-5",
         max_tokens: 1024,
         system: system,
         messages: [{ role: "user", content: userMsg }]
@@ -873,12 +965,11 @@ ${text}
     const data = await res.json();
     return (data.content || []).map(c => c.text || "").join("").trim();
   }
-  function callAnthropic(userMsg) { return callAnthropic2(SYSTEM_PROMPT, userMsg); }
 
   async function requestAIFeedback(sess, L, text, phase) {
     const slot = phase === "retry" ? $("#ai-retry-slot") : $("#ai-fb");
     try {
-      const out = await callAnthropic(buildUserMessage(L, text, phase));
+      const out = await callAI(SYSTEM_PROMPT, buildUserMessage(L, text, phase));
       if (phase === "retry") sess.aiRetryFeedback = out; else sess.aiFeedback = out;
       save();
       if (slot) {
@@ -891,12 +982,12 @@ ${text}
   }
 
   async function testAI() {
-    const key = $("#set-apikey").value.trim();
-    if (!key) { setStatus("#ai-status", "먼저 API 키를 입력하세요.", "err"); return; }
-    state.settings.apiKey = key; state.settings.model = $("#set-model").value;
+    persistForm(uiProvider);
+    state.settings.provider = uiProvider;
+    if (!currentKey()) { setStatus("#ai-status", "먼저 API 키를 입력하세요.", "err"); return; }
     setStatus("#ai-status", "연결 테스트 중…", "");
     try {
-      const out = await callAnthropic("한 단어로 '연결됨'이라고만 답하세요.");
+      const out = await callAI("당신은 테스트 도우미입니다.", "한 단어로 '연결됨'이라고만 답하세요.");
       setStatus("#ai-status", "연결 성공 ✓ — " + out.slice(0, 40), "ok");
     } catch (e) {
       setStatus("#ai-status", "연결 실패: " + e.message, "err");
@@ -1001,7 +1092,7 @@ ${text}
   }
 
   function viewPracticeFeedback(ap, s) {
-    const useAI = state.settings.aiEnabled && state.settings.apiKey;
+    const useAI = aiReady();
     const checks = (s.tips || []).map((t, i) =>
       `<label class="check-item ${ap.checked.indexOf(i) >= 0 ? "checked" : ""}"><input type="checkbox" data-i="${i}" ${ap.checked.indexOf(i) >= 0 ? "checked" : ""}><span>${esc(t)}</span></label>`
     ).join("");
@@ -1046,7 +1137,7 @@ ${text}
     }));
     $("#prac-retry").addEventListener("click", () => { ap.stage = "write"; ap.aiFeedback = ""; save(); renderPractice(); window.scrollTo(0, 0); });
     $("#prac-save").addEventListener("click", () => { savePractice(ap, s); state.activePractice = null; save(); renderPractice(); switchTab("tab-practice"); });
-    if (state.settings.aiEnabled && state.settings.apiKey) {
+    if (aiReady()) {
       if (ap.aiFeedback) { const el = $("#prac-ai"); if (el) el.innerHTML = esc(ap.aiFeedback); }
       else requestPracticeAI(ap, s);
     }
@@ -1126,7 +1217,7 @@ ${ap.response}
 
 위 상황에 맞게 규칙대로 피드백해 주세요.`;
     try {
-      const out = await callAnthropic2(PRACTICE_SYSTEM, msg);
+      const out = await callAI(PRACTICE_SYSTEM, msg);
       ap.aiFeedback = out; save();
       if (slot) slot.innerHTML = esc(out);
     } catch (e) {

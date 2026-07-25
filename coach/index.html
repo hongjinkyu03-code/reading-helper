@@ -109,21 +109,24 @@
     <!-- ===================== 설정 탭 ===================== -->
     <section id="tab-settings" class="tab">
       <div class="card">
-        <h2>🤖 AI 코치 피드백 <span class="sub">선택</span></h2>
+        <h2>🤖 AI 코치 피드백 <span class="sub">선택 · 무료 가능</span></h2>
         <p class="muted small">
-          이 앱은 AI 없이도 완전히 동작해요(스스로 발견하는 자기 주목 방식). 여기에 본인의
-          <b>Anthropic API 키</b>를 넣으면, 제출한 글에 대해 코칭 프롬프트 그대로의 진짜 피드백을 받을 수 있어요.
-          키는 이 기기(브라우저)에만 저장되며 서버로 보내지 않습니다.
+          이 앱은 AI 없이도 완전히 동작해요(스스로 발견하는 자기 주목 방식). 여기에 API 키를 넣으면,
+          제출한 글·말에 대해 진짜 맞춤 피드백을 받을 수 있어요. <b>Google Gemini는 무료</b>로 쓸 수 있습니다.
+          키는 이 기기(브라우저)에만 저장되며 저희 서버로는 전송되지 않습니다.
         </p>
-        <label>Anthropic API 키
-          <input type="password" id="set-apikey" placeholder="sk-ant-...">
-        </label>
-        <label>모델
-          <select id="set-model">
-            <option value="claude-sonnet-5">Claude Sonnet 5 (권장·균형)</option>
-            <option value="claude-opus-4-8">Claude Opus 4.8 (가장 정교)</option>
-            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (빠름·저렴)</option>
+        <label>AI 제공자
+          <select id="set-provider">
+            <option value="gemini">Google Gemini (무료 · 권장)</option>
+            <option value="anthropic">Anthropic Claude (유료)</option>
           </select>
+        </label>
+        <label>API 키
+          <input type="password" id="set-apikey" placeholder="AIza…">
+        </label>
+        <p class="muted" id="key-help" style="font-size:12px; margin-top:6px"></p>
+        <label>모델
+          <select id="set-model"></select>
         </label>
         <label class="row-check">
           <input type="checkbox" id="set-ai-enabled"> AI 피드백 사용
