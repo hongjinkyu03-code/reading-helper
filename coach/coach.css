@@ -218,6 +218,50 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
 .nav-btn .nav-icon{font-size:20px}
 .nav-btn.active{color:var(--primary)}
 
+/* ---------- 실전 말하기 ---------- */
+.practice-intro{font-size:13.5px; color:#40435c; margin-bottom:12px}
+.cat-scroll{display:flex; gap:8px; overflow-x:auto; padding:2px 2px 10px; margin:0 -2px;
+  -webkit-overflow-scrolling:touch; scrollbar-width:none}
+.cat-scroll::-webkit-scrollbar{display:none}
+.cat-chip{flex:0 0 auto; border:1px solid var(--line); background:#fff; border-radius:999px;
+  padding:8px 14px; font-size:13px; font-weight:700; color:#40435c; cursor:pointer; white-space:nowrap}
+.cat-chip.active{background:var(--primary); color:#fff; border-color:var(--primary)}
+.cat-chip .n{opacity:.7; font-weight:600; margin-left:4px; font-size:11px}
+
+.sit-card{display:flex; align-items:center; gap:12px; background:#fff; border:1px solid var(--line);
+  border-radius:14px; padding:13px 14px; margin-bottom:10px; cursor:pointer; box-shadow:var(--shadow);
+  transition:transform .08s ease}
+.sit-card:active{transform:scale(.99)}
+.sit-emoji{font-size:24px; flex:0 0 auto; width:42px; height:42px; border-radius:12px;
+  background:var(--primary-soft); display:flex; align-items:center; justify-content:center}
+.sit-emoji.speak{background:#e2f6f3}
+.sit-main{flex:1; min-width:0}
+.sit-title{font-weight:800; font-size:15px; margin-bottom:2px}
+.sit-scene{font-size:12.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap}
+.sit-type{flex:0 0 auto; font-size:10.5px; font-weight:800; padding:3px 8px; border-radius:999px}
+.type-talk{background:#e2f6f3; color:#0e7c73}
+.type-reply{background:var(--primary-soft); color:var(--primary)}
+
+.sit-detail .scene-box{background:#fbfbfe; border:1px solid var(--line); border-radius:14px;
+  padding:14px; font-size:14.5px; line-height:1.6}
+.sit-detail .scene-box .emo{font-size:22px; display:block; margin-bottom:6px}
+.mission-box{border-left:4px solid var(--accent); background:#e8f7f5; border-radius:0 12px 12px 0;
+  padding:12px 14px; margin-top:12px}
+.mission-box .lbl{font-size:11px; font-weight:800; color:#0e7c73; letter-spacing:.4px}
+.mission-box p{margin:4px 0 0; font-weight:700; font-size:15px}
+.model-answer{background:#eef8f1; border:1px solid #cdeed9; border-radius:12px; padding:12px 14px;
+  font-size:14.5px; line-height:1.65}
+.pitfall-box{background:#fdf0ee; border:1px solid #f6d9d3; border-radius:12px; padding:11px 14px;
+  font-size:13.5px; color:#7a3b32; margin-top:10px}
+.check-item{display:flex; gap:10px; align-items:flex-start; background:#f6f7fe; border-radius:11px;
+  padding:10px 12px; margin-bottom:8px; cursor:pointer; font-size:14px}
+.check-item input{width:20px; height:20px; margin:1px 0 0; flex:0 0 auto; accent-color:var(--primary)}
+.check-item.checked{background:#eef8f1}
+.reveal-btn{width:100%}
+.sit-back{font-size:13px; color:var(--primary); background:none; border:none; font-weight:700;
+  cursor:pointer; padding:4px 0; margin-bottom:6px}
+
 /* ---------- iOS 설치 안내 시트 ---------- */
 .install-sheet{
   position:fixed; inset:0; z-index:50; display:flex; align-items:flex-end;

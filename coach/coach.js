@@ -32,6 +32,8 @@
       lastCompletedDate: null,
       activity: {},           // { 'YYYY-MM-DD': count }
       lastWeeklyReviewDay: 0,
+      practices: [],          // 실전 말하기 연습 기록
+      activePractice: null,   // 진행 중 실전 연습
       settings: { apiKey: "", model: "claude-sonnet-5", aiEnabled: false }
     };
   }
@@ -739,9 +741,10 @@
 
   /* ============================ 기록 탭 ============================ */
   function renderLog() {
+    renderPracticeLog();
     const el = $("#log-list");
     const list = [...state.sessions].reverse();
-    if (!list.length) { el.innerHTML = `<p class="empty-msg">아직 기록이 없어요. 오늘 탭에서 첫 세션을 시작해 보세요!</p>`; return; }
+    if (!list.length) { el.innerHTML = `<p class="empty-msg">아직 데일리 세션 기록이 없어요. 오늘 탭에서 첫 세션을 시작해 보세요!</p>`; return; }
     el.innerHTML = list.map((s, idx) => {
       const tb = s.track === "speak" ? "tb-speak" : s.track === "review" ? "tb-review" : "tb-write";
       const tn = s.track === "speak" ? "말하기" : s.track === "review" ? "복습" : s.lessonId === "diagnostic" ? "진단" : "글쓰기";
@@ -759,6 +762,30 @@
           <span><span class="track-badge ${tb}">${tn}</span> <span class="ldate">${esc(s.date || "")}</span></span>
         </div>
         <div class="lskill">${esc(s.skill)}</div>
+        <div class="lbody">${esc(body)}</div>
+      </div>`;
+    }).join("");
+    $$(".log-item", el).forEach(it => it.addEventListener("click", () => it.classList.toggle("open")));
+  }
+
+  function renderPracticeLog() {
+    const card = $("#practice-log-card"), el = $("#practice-log");
+    if (!card || !el) return;
+    if (!state.practices.length) { card.style.display = "none"; return; }
+    card.style.display = "block";
+    el.innerHTML = [...state.practices].reverse().map((p, idx) => {
+      const cat = PRACTICE_CATS.find(c => c.key === p.cat);
+      const body = [
+        `【내가 한 말】\n${p.response}`,
+        p.tipsCount ? `\n핵심 포인트 ${p.checkedCount}/${p.tipsCount} 반영` : "",
+        p.aiFeedback ? `\n\n🤖 AI 피드백\n${p.aiFeedback}` : ""
+      ].filter(Boolean).join("");
+      return `
+      <div class="log-item" data-p="${idx}">
+        <div class="lh">
+          <span class="lday">${cat ? cat.emoji : "🎤"} ${esc(p.title)}</span>
+          <span><span class="track-badge ${p.type === "talk" ? "tb-speak" : "tb-write"}">${p.type === "talk" ? "발표" : "대화"}</span> <span class="ldate">${esc(p.date || "")}</span></span>
+        </div>
         <div class="lbody">${esc(body)}</div>
       </div>`;
     }).join("");
@@ -823,7 +850,7 @@ ${text}
 위 제출에 대해 규칙에 따라 피드백해 주세요. 오늘 기술(${L.skill})에만 집중하세요.`;
   }
 
-  async function callAnthropic(userMsg) {
+  async function callAnthropic2(system, userMsg) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -835,7 +862,7 @@ ${text}
       body: JSON.stringify({
         model: state.settings.model || "claude-sonnet-5",
         max_tokens: 1024,
-        system: SYSTEM_PROMPT,
+        system: system,
         messages: [{ role: "user", content: userMsg }]
       })
     });
@@ -846,6 +873,7 @@ ${text}
     const data = await res.json();
     return (data.content || []).map(c => c.text || "").join("").trim();
   }
+  function callAnthropic(userMsg) { return callAnthropic2(SYSTEM_PROMPT, userMsg); }
 
   async function requestAIFeedback(sess, L, text, phase) {
     const slot = phase === "retry" ? $("#ai-retry-slot") : $("#ai-fb");
@@ -884,10 +912,233 @@ ${text}
     return 0;
   }
 
+  /* ============================ 실전 말하기 ============================ */
+  let practiceCat = "all";
+  const sitById = (id) => SITUATIONS.find(s => s.id === id);
+
+  function renderPractice() {
+    const root = $("#practice-root");
+    if (!root) return;
+    const ap = state.activePractice;
+    if (ap) {
+      const sit = sitById(ap.sid);
+      root.innerHTML = ap.stage === "feedback" ? viewPracticeFeedback(ap, sit) : viewPracticeWrite(ap, sit);
+      ap.stage === "feedback" ? wirePracticeFeedback(ap, sit) : wirePracticeWrite(ap, sit);
+    } else {
+      root.innerHTML = viewPracticeBrowse();
+      wirePracticeBrowse();
+    }
+  }
+
+  function viewPracticeBrowse() {
+    const cats = [{ key: "all", label: "전체", emoji: "✨" }].concat(PRACTICE_CATS);
+    const chips = cats.map(c => {
+      const n = c.key === "all" ? SITUATIONS.length : SITUATIONS.filter(s => s.cat === c.key).length;
+      return `<button class="cat-chip ${practiceCat === c.key ? "active" : ""}" data-cat="${c.key}">${c.emoji} ${esc(c.label)}<span class="n">${n}</span></button>`;
+    }).join("");
+    const list = SITUATIONS.filter(s => practiceCat === "all" || s.cat === practiceCat);
+    const cards = list.map(s => {
+      const cat = PRACTICE_CATS.find(c => c.key === s.cat);
+      const done = state.practices.some(p => p.sid === s.id);
+      return `
+      <div class="sit-card" data-sid="${s.id}">
+        <div class="sit-emoji ${s.type === "talk" ? "speak" : ""}">${cat ? cat.emoji : "🎤"}</div>
+        <div class="sit-main">
+          <div class="sit-title">${esc(s.title)} ${done ? "✅" : ""}</div>
+          <div class="sit-scene">${esc(s.scene)}</div>
+        </div>
+        <span class="sit-type ${s.type === "talk" ? "type-talk" : "type-reply"}">${s.type === "talk" ? "발표" : "대화"}</span>
+      </div>`;
+    }).join("");
+    const doneCount = state.practices.length;
+    return `
+      <div class="card" style="padding:14px 16px">
+        <h2 style="margin-bottom:6px">🎤 실전 상황별 말하기</h2>
+        <p class="practice-intro">한국인이 자주 겪는 스피치 상황 <b>${SITUATIONS.length}개</b>. 상황을 골라 실제로 말하고,
+        핵심 포인트 점검 · 모범 답변 대비 · 피드백으로 연습하세요.${doneCount ? ` <b>${doneCount}회</b> 연습함.` : ""}</p>
+        <div class="cat-scroll">${chips}</div>
+      </div>
+      <div>${cards}</div>`;
+  }
+  function wirePracticeBrowse() {
+    $$(".cat-chip").forEach(c => c.addEventListener("click", () => { practiceCat = c.getAttribute("data-cat"); renderPractice(); }));
+    $$(".sit-card").forEach(c => c.addEventListener("click", () => {
+      state.activePractice = { sid: c.getAttribute("data-sid"), stage: "write", response: "", checked: [], aiFeedback: "" };
+      save(); renderPractice(); window.scrollTo(0, 0);
+    }));
+  }
+
+  function viewPracticeWrite(ap, s) {
+    const cat = PRACTICE_CATS.find(c => c.key === s.cat);
+    const timer = s.type === "talk" && s.speak ? viewTimerP(s) : "";
+    const hint = s.type === "talk"
+      ? "소리 내어 실제로 말해본 뒤, 말한 내용을 아래에 옮겨 적으세요."
+      : "이 상황에서 당신이라면 뭐라고 할지, 실제 말투로 적어보세요.";
+    return `
+      <button class="sit-back" id="prac-back">← 상황 목록</button>
+      <div class="sit-detail session-step">
+        <span class="step-kicker">${cat ? cat.emoji + " " + esc(cat.label) : ""} · ${s.type === "talk" ? "발표" : "대화 반응"}</span>
+        <h2 style="margin:2px 0 10px">${esc(s.title)}</h2>
+        <div class="scene-box"><span class="emo">${cat ? cat.emoji : "🎤"}</span>${esc(s.scene)}</div>
+        <div class="mission-box"><span class="lbl">🎯 미션</span><p>${esc(s.mission)}</p></div>
+        ${timer}
+        <p class="muted small" style="margin-top:12px">${hint}</p>
+        <textarea id="prac-input" rows="7" placeholder="${s.type === "talk" ? "말한 내용을 옮겨 적기…" : "예: “부장님, 챙겨주셔서 감사합니다. 다만…”"}">${esc(ap.response)}</textarea>
+        <div class="char-count" id="prac-count">0자</div>
+        <button class="btn primary" id="prac-submit">제출하고 피드백 보기</button>
+      </div>`;
+  }
+  function wirePracticeWrite(ap, s) {
+    $("#prac-back").addEventListener("click", () => { state.activePractice = null; save(); renderPractice(); });
+    const ta = $("#prac-input"), cc = $("#prac-count");
+    const upd = () => { cc.textContent = charLen(ta.value) + "자"; };
+    ta.addEventListener("input", () => { ap.response = ta.value; upd(); }); upd();
+    if (s.type === "talk" && s.speak && $("#ptm-start")) setupTimerP(s);
+    $("#prac-submit").addEventListener("click", () => {
+      if (charLen(ta.value) < 10) { alert("조금 더 말해보세요 (최소 10자). 짧아도 좋으니 시도해봅시다!"); return; }
+      ap.response = ta.value.trim(); ap.stage = "feedback"; stopTimerP(); save(); renderPractice(); window.scrollTo(0, 0);
+    });
+  }
+
+  function viewPracticeFeedback(ap, s) {
+    const useAI = state.settings.aiEnabled && state.settings.apiKey;
+    const checks = (s.tips || []).map((t, i) =>
+      `<label class="check-item ${ap.checked.indexOf(i) >= 0 ? "checked" : ""}"><input type="checkbox" data-i="${i}" ${ap.checked.indexOf(i) >= 0 ? "checked" : ""}><span>${esc(t)}</span></label>`
+    ).join("");
+    const m = metrics(ap.response);
+    return `
+      <button class="sit-back" id="prac-back">← 상황 목록</button>
+      <div class="sit-detail session-step">
+        <span class="step-kicker">${esc(s.title)} · 피드백</span>
+
+        <div class="section-label">내가 한 말</div>
+        <div class="ai-answer">${esc(ap.response)}</div>
+
+        <div class="section-label">스스로 점검 — 이걸 담았나요?</div>
+        <p class="muted small" style="margin:-2px 0 8px">해당하는 것에 체크해보세요. 빠진 항목이 곧 다음 연습 포인트예요.</p>
+        ${checks}
+
+        <div class="section-label">✅ 모범 답변 (내 답과 비교해보세요)</div>
+        <div class="model-answer">${esc(s.good)}</div>
+        <div class="pitfall-box">⚠️ <b>흔한 실수</b> — ${esc(s.pitfall)}</div>
+
+        <div class="fb-block fb-improve" style="margin-top:12px">
+          <span class="fb-h">📊 관찰</span>
+          분량 <b>${m.chars}자</b>, 문장 <b>${m.sentences}개</b>.
+          ${s.type === "talk" ? (m.chars < 60 ? " 발표치고 조금 짧아요 — 근거·예시를 한 겹 더 얹어보세요." : " 발표 분량으로 적절해요.") : (m.chars > 180 ? " 대화 반응치고 길어요 — 핵심만 남겨 더 간결하게." : " 대화 반응으로 적절한 길이예요.")}
+        </div>
+
+        ${useAI ? `<div class="fb-block fb-improve"><span class="fb-h">🤖 AI 코치 피드백</span><div id="prac-ai"><span class="spinner"></span>피드백을 준비하고 있어요…</div></div>` : `<p class="muted small">💡 설정에서 API 키를 넣으면 이 답변에 대한 맞춤 AI 피드백을 받을 수 있어요.</p>`}
+
+        <button class="btn primary" id="prac-retry">다시 말해보기</button>
+        <button class="btn ghost small" id="prac-save">저장하고 목록으로</button>
+      </div>`;
+  }
+  function wirePracticeFeedback(ap, s) {
+    $("#prac-back").addEventListener("click", () => { savePractice(ap, s); state.activePractice = null; save(); renderPractice(); });
+    $$(".check-item input").forEach(inp => inp.addEventListener("change", () => {
+      const i = parseInt(inp.getAttribute("data-i"), 10);
+      const idx = ap.checked.indexOf(i);
+      if (inp.checked && idx < 0) ap.checked.push(i);
+      else if (!inp.checked && idx >= 0) ap.checked.splice(idx, 1);
+      inp.closest(".check-item").classList.toggle("checked", inp.checked);
+      save();
+    }));
+    $("#prac-retry").addEventListener("click", () => { ap.stage = "write"; ap.aiFeedback = ""; save(); renderPractice(); window.scrollTo(0, 0); });
+    $("#prac-save").addEventListener("click", () => { savePractice(ap, s); state.activePractice = null; save(); renderPractice(); switchTab("tab-practice"); });
+    if (state.settings.aiEnabled && state.settings.apiKey) {
+      if (ap.aiFeedback) { const el = $("#prac-ai"); if (el) el.innerHTML = esc(ap.aiFeedback); }
+      else requestPracticeAI(ap, s);
+    }
+  }
+  function savePractice(ap, s) {
+    if (charLen(ap.response) < 5) return;
+    state.practices.push({
+      sid: s.id, cat: s.cat, title: s.title, type: s.type,
+      response: ap.response, checkedCount: ap.checked.length, tipsCount: (s.tips || []).length,
+      aiFeedback: ap.aiFeedback || "", date: todayStr()
+    });
+  }
+
+  /* 실전 발표용 타이머 (데일리 타이머와 분리) */
+  function viewTimerP(s) {
+    return `
+    <div class="card" style="margin-top:12px">
+      <div class="timer-wrap">
+        <div class="timer-phase" id="ptm-phase">준비 시간</div>
+        <div class="timer-display prep" id="ptm-display">${fmt(s.speak.prepSec || s.speak.speakSec)}</div>
+        <div class="timer-controls">
+          <button class="btn small btn-secondary" id="ptm-start">▶ 준비 시작</button>
+          <button class="btn small ghost" id="ptm-reset">초기화</button>
+        </div>
+      </div>
+      <p class="muted small" style="text-align:center;margin:6px 0 0">준비 ${s.speak.prepSec}초 → 말하기 ${s.speak.speakSec}초</p>
+    </div>`;
+  }
+  let _ptId = null, _ptState = null;
+  function setupTimerP(s) {
+    _ptState = { phase: "prep", remain: s.speak.prepSec || s.speak.speakSec, prep: s.speak.prepSec, speak: s.speak.speakSec };
+    const start = $("#ptm-start"), reset = $("#ptm-reset");
+    start.addEventListener("click", () => { if (_ptId) return; start.textContent = "진행 중…"; start.disabled = true; _ptId = setInterval(tickP, 1000); });
+    reset.addEventListener("click", stopTimerP);
+  }
+  function tickP() {
+    const s = _ptState, disp = $("#ptm-display"), phase = $("#ptm-phase");
+    if (!disp) { stopTimerP(); return; }
+    s.remain--;
+    if (s.remain <= 0) {
+      if (s.phase === "prep" && s.speak) {
+        s.phase = "speak"; s.remain = s.speak; phase.textContent = "🎤 말하기!"; disp.classList.remove("prep");
+        if (navigator.vibrate) navigator.vibrate(200);
+      } else {
+        disp.textContent = "완료!"; disp.classList.add("done"); phase.textContent = "수고했어요 — 이제 옮겨 적으세요";
+        if (navigator.vibrate) navigator.vibrate([120, 60, 120]); stopTimerP(true); return;
+      }
+    }
+    disp.textContent = fmt(s.remain);
+  }
+  function stopTimerP(keep) {
+    if (_ptId) { clearInterval(_ptId); _ptId = null; }
+    const btn = $("#ptm-start");
+    if (btn && !keep) { btn.textContent = "▶ 준비 시작"; btn.disabled = false;
+      if (_ptState) { const d = $("#ptm-display"); if (d) { d.textContent = fmt(_ptState.prep || _ptState.speak); d.className = "timer-display prep"; } const p = $("#ptm-phase"); if (p) p.textContent = "준비 시간"; } }
+  }
+
+  const PRACTICE_SYSTEM = `당신은 한국인의 실전 말하기·대화를 돕는 스피치 코치입니다.
+학습자가 특정 상황(회식·발표·면접·경조사·일상 대화 등)에서 실제로 한 말을 보고 피드백합니다.
+규칙:
+1) 잘한 점 1가지를 구체적으로 짚습니다(어느 표현이 왜 효과적인지).
+2) 이 상황에서 더 나아질 점 최대 2가지만. 상황의 핵심 포인트에 집중합니다.
+3) 학습자의 말 일부를 골라 '이렇게 바꾸면 더 좋다'를 개선 전→후로 보여줍니다.
+4) 한국의 실제 상황 맥락(예의·관계·분위기)을 고려합니다.
+5) 통째로 대신 말해주지 말고, 학습자가 고치도록 이끕니다.
+따뜻하지만 솔직하게, 한국어로 350자 내외로 답하세요.`;
+
+  async function requestPracticeAI(ap, s) {
+    const slot = $("#prac-ai");
+    const msg = `[상황] ${s.scene}
+[미션] ${s.mission}
+[이 상황의 핵심 포인트] ${(s.tips || []).join(" / ")}
+[유형] ${s.type === "talk" ? "발표/스피치" : "대화 반응"}
+
+[학습자가 실제로 한 말]
+${ap.response}
+
+위 상황에 맞게 규칙대로 피드백해 주세요.`;
+    try {
+      const out = await callAnthropic2(PRACTICE_SYSTEM, msg);
+      ap.aiFeedback = out; save();
+      if (slot) slot.innerHTML = esc(out);
+    } catch (e) {
+      if (slot) slot.innerHTML = `<span style="color:var(--danger)">AI 피드백 실패: ${esc(e.message)}. 설정에서 키/모델을 확인하세요.</span>`;
+    }
+  }
+
   /* ============================ 탭 전환 ============================ */
   function switchTab(id) {
     $$(".tab").forEach(t => t.classList.toggle("active", t.id === id));
     $$(".nav-btn").forEach(b => b.classList.toggle("active", b.getAttribute("data-tab") === id));
+    if (id === "tab-practice") renderPractice();
     if (id === "tab-progress") renderProgress();
     if (id === "tab-log") renderLog();
     if (id === "tab-settings") renderSettings();

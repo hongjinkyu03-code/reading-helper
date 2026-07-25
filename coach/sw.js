@@ -1,11 +1,12 @@
 /* service worker — 오프라인 캐시 (앱 셸) */
-const CACHE = "coach-v2";
+const CACHE = "coach-v3";
 const ASSETS = [
   "./",
   "./index.html",
   "./coach.css",
   "./coach.js",
   "./curriculum.js",
+  "./situations.js",
   "./manifest.json",
   "./icon-180.png",
   "./icon-192.png",

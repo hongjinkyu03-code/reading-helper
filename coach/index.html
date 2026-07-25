@@ -44,6 +44,11 @@
       <div id="session-root"><!-- coach.js 가 세션 단계별 화면을 렌더링 --></div>
     </section>
 
+    <!-- ===================== 실전 말하기 탭 ===================== -->
+    <section id="tab-practice" class="tab">
+      <div id="practice-root"><!-- coach.js 가 렌더링 --></div>
+    </section>
+
     <!-- ===================== 진도 탭 ===================== -->
     <section id="tab-progress" class="tab">
       <div class="stat-row">
@@ -90,8 +95,12 @@
 
     <!-- ===================== 기록 탭 ===================== -->
     <section id="tab-log" class="tab">
+      <div class="card" id="practice-log-card" style="display:none">
+        <h2>🎤 실전 말하기 연습</h2>
+        <div id="practice-log"></div>
+      </div>
       <div class="card">
-        <h2>📚 지난 세션</h2>
+        <h2>📝 데일리 세션</h2>
         <p class="muted small">과제 원본과 재도전을 다시 열어볼 수 있어요. 첫 주에 쓴 글을 나중에 다시 고쳐 쓰면 성장이 보입니다.</p>
         <div id="log-list"></div>
       </div>
@@ -173,12 +182,14 @@
 
   <nav class="bottom-nav">
     <button class="nav-btn active" data-tab="tab-today"><span class="nav-icon">📝</span>오늘</button>
+    <button class="nav-btn" data-tab="tab-practice"><span class="nav-icon">🎤</span>실전</button>
     <button class="nav-btn" data-tab="tab-progress"><span class="nav-icon">📈</span>진도</button>
     <button class="nav-btn" data-tab="tab-log"><span class="nav-icon">📚</span>기록</button>
     <button class="nav-btn" data-tab="tab-settings"><span class="nav-icon">⚙️</span>설정</button>
   </nav>
 
   <script src="curriculum.js"></script>
+  <script src="situations.js"></script>
   <script src="coach.js"></script>
 </body>
 </html>
