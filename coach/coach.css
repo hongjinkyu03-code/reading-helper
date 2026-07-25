@@ -218,4 +218,35 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
 .nav-btn .nav-icon{font-size:20px}
 .nav-btn.active{color:var(--primary)}
 
+/* ---------- iOS 설치 안내 시트 ---------- */
+.install-sheet{
+  position:fixed; inset:0; z-index:50; display:flex; align-items:flex-end;
+  background:rgba(20,20,40,.5); backdrop-filter:blur(2px);
+  animation:fade .2s ease;
+}
+.install-sheet[hidden]{display:none}
+.install-card{
+  background:#fff; width:100%; max-width:640px; margin:0 auto;
+  border-radius:22px 22px 0 0; padding:24px 20px calc(24px + env(safe-area-inset-bottom));
+  box-shadow:0 -6px 30px rgba(0,0,0,.2); position:relative;
+  animation:slideup .28s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes slideup{from{transform:translateY(100%)}to{transform:none}}
+.install-x{position:absolute; top:14px; right:14px; border:none; background:#f0f1f9;
+  width:32px; height:32px; border-radius:50%; font-size:14px; color:var(--muted); cursor:pointer}
+.install-logo{font-size:42px; text-align:center}
+.install-card h2{text-align:center; font-size:19px; margin:6px 0 8px}
+.install-card p{text-align:center}
+.install-steps{margin:16px 0; padding:0; list-style:none; counter-reset:step}
+.install-steps li{position:relative; padding:12px 12px 12px 48px; margin-bottom:8px;
+  background:#f6f7fe; border-radius:12px; font-size:14px; line-height:1.55}
+.install-steps li::before{counter-increment:step; content:counter(step);
+  position:absolute; left:12px; top:11px; width:26px; height:26px; border-radius:50%;
+  background:var(--primary); color:#fff; font-weight:800; font-size:14px;
+  display:flex; align-items:center; justify-content:center}
+.ios-share{display:inline-flex; align-items:center; justify-content:center;
+  min-width:22px; height:22px; padding:0 4px; background:#e7f0ff; color:#0a84ff;
+  border-radius:6px; font-size:15px; vertical-align:-4px}
+.install-card .btn.primary{margin-top:6px}
+
 @media (max-width:360px){ #skill-grid{grid-template-columns:1fr} }

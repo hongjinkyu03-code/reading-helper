@@ -894,10 +894,40 @@ ${text}
     window.scrollTo(0, 0);
   }
 
+  /* ============================ 아이폰 설치 안내 ============================ */
+  function isIOS() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+  function isStandalone() {
+    return window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  }
+  function showInstallSheet() { const s = $("#ios-install"); if (s) s.hidden = false; }
+  function hideInstallSheet() { const s = $("#ios-install"); if (s) s.hidden = true; }
+  function setupInstall() {
+    const close = () => { hideInstallSheet(); state.iosHintShown = true; save(); };
+    const x = $("#ios-install-close"), ok = $("#ios-install-ok"), show = $("#show-install");
+    if (x) x.addEventListener("click", close);
+    if (ok) ok.addEventListener("click", close);
+    if (show) show.addEventListener("click", showInstallSheet);
+    // 설정 카드 상태
+    const note = $("#installed-note");
+    if (isStandalone()) {
+      if (note) note.style.display = "block";
+      if (show) show.style.display = "none";
+    }
+    // iOS 사파리에서 아직 설치 안 했고, 안내를 본 적 없으면 한 번 자동 표시
+    if (isIOS() && !isStandalone() && !state.iosHintShown) {
+      setTimeout(showInstallSheet, 900);
+    }
+  }
+
   /* ============================ 초기화 ============================ */
   function init() {
     $$(".nav-btn").forEach(b => b.addEventListener("click", () => switchTab(b.getAttribute("data-tab"))));
     wireSettingsOnce();
+    setupInstall();
     renderAll();
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(() => {});

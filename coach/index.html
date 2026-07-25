@@ -2,13 +2,35 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#4338ca">
   <title>글쓰기·말하기 코치</title>
   <meta name="description" content="언어학·교육심리학·수사학에 근거해 매일 과제와 피드백을 주는 글쓰기·말하기 코치">
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="coach.css">
-  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <!-- iOS: 홈 화면 앱(전체화면) 설정 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="글말 코치">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+  <link rel="icon" type="image/png" href="icon-192.png">
+
+  <!-- iOS 실행 스플래시 (기기별) -->
+  <link rel="apple-touch-startup-image" href="splash/splash-1290x2796.png"
+    media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1179x2556.png"
+    media="(device-width:393px) and (device-height:852px) and (-webkit-device-pixel-ratio:3)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1170x2532.png"
+    media="(device-width:390px) and (device-height:844px) and (-webkit-device-pixel-ratio:3)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1125x2436.png"
+    media="(device-width:375px) and (device-height:812px) and (-webkit-device-pixel-ratio:3)">
+  <link rel="apple-touch-startup-image" href="splash/splash-828x1792.png"
+    media="(device-width:414px) and (device-height:896px) and (-webkit-device-pixel-ratio:2)">
+  <link rel="apple-touch-startup-image" href="splash/splash-750x1334.png"
+    media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)">
 </head>
 <body>
   <header class="app-header">
@@ -102,6 +124,13 @@
         <p id="ai-status" class="notify-status"></p>
       </div>
 
+      <div class="card" id="install-card">
+        <h2>📱 아이폰 홈 화면에 설치</h2>
+        <p class="muted small">사파리에서 <b>공유 → 홈 화면에 추가</b>를 하면 전체화면 앱으로 쓸 수 있어요.</p>
+        <button class="btn ghost small" id="show-install">설치 방법 보기</button>
+        <p class="notify-status ok" id="installed-note" style="display:none">이미 앱으로 설치되어 실행 중이에요 ✓</p>
+      </div>
+
       <div class="card">
         <h2>💾 데이터</h2>
         <p class="muted small">모든 기록은 이 기기에만 저장됩니다.</p>
@@ -119,6 +148,28 @@
       </div>
     </section>
   </main>
+
+  <!-- iOS 홈 화면 설치 안내 -->
+  <div id="ios-install" class="install-sheet" hidden>
+    <div class="install-card">
+      <button class="install-x" id="ios-install-close" aria-label="닫기">✕</button>
+      <div class="install-logo">✍️</div>
+      <h2>아이폰 앱으로 설치하기</h2>
+      <p class="muted small">홈 화면에 추가하면 주소창 없이 <b>전체화면 앱</b>처럼 열리고, 오프라인에서도 동작해요.</p>
+      <ol class="install-steps">
+        <li>사파리 하단(또는 상단)의 <b>공유 버튼</b>
+          <span class="ios-share" aria-label="공유">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#0a84ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v13M12 3l-4 4M12 3l4 4"/><path d="M6 11H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/>
+            </svg>
+          </span> 을 누르세요.</li>
+        <li>메뉴에서 <b>“홈 화면에 추가”</b> 를 선택하세요.</li>
+        <li>오른쪽 위 <b>“추가”</b> 를 누르면 끝! 홈 화면에 <b>글말 코치</b> 아이콘이 생겨요.</li>
+      </ol>
+      <p class="muted" style="font-size:12px">※ 반드시 <b>사파리(Safari)</b>에서 열어야 설치돼요. (크롬·인앱 브라우저 불가)</p>
+      <button class="btn primary" id="ios-install-ok">알겠어요</button>
+    </div>
+  </div>
 
   <nav class="bottom-nav">
     <button class="nav-btn active" data-tab="tab-today"><span class="nav-icon">📝</span>오늘</button>
