@@ -71,6 +71,7 @@ main{max-width:640px; margin:0 auto; padding:16px 14px 24px}
 }
 .step-kicker.speak{color:#0e7c73; background:#e2f6f3}
 .step-kicker.review{color:#b45309; background:#fdf1df}
+.step-kicker.quality{color:#8b2fb8; background:#f7ebfd}
 .recall-line{
   font-size:13px; color:var(--muted); background:#fafbff; border:1px dashed var(--line);
   border-radius:12px; padding:9px 12px; margin-bottom:14px;
@@ -163,7 +164,11 @@ input:focus,textarea:focus,select:focus{outline:none; border-color:var(--primary
 .timer-controls{display:flex; gap:8px; justify-content:center}
 
 /* ---------- 기술 그리드 / 진도 ---------- */
-#skill-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+#skill-grid{display:block}
+.skill-group{margin-bottom:14px}
+.skill-group:last-child{margin-bottom:0}
+.skill-group-h{font-size:12px; font-weight:800; color:var(--muted); margin-bottom:7px}
+.skill-group-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
 .skill-chip{border:1px solid var(--line); border-radius:12px; padding:9px 11px; font-size:13px;
   display:flex; align-items:center; justify-content:space-between; background:#fff}
 .skill-chip .sname{font-weight:600}
@@ -194,6 +199,7 @@ input:focus,textarea:focus,select:focus{outline:none; border-color:var(--primary
 .tb-write{background:var(--primary-soft); color:var(--primary)}
 .tb-speak{background:#e2f6f3; color:#0e7c73}
 .tb-review{background:#fdf1df; color:#b45309}
+.tb-quality{background:#f7ebfd; color:#8b2fb8}
 
 /* ---------- 진단/온보딩 ---------- */
 .welcome h2{font-size:20px}
@@ -312,6 +318,94 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
 .sit-back{font-size:13px; color:var(--primary); background:none; border:none; font-weight:700;
   cursor:pointer; padding:4px 0; margin-bottom:6px}
 
+/* ---------- 품질 6축 (독자 리포트) ---------- */
+.qscore-card{background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px;
+  margin-top:12px}
+.qscore-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px}
+.qscore-title{font-weight:800; font-size:14px}
+.qscore-avg{font-size:13px; color:var(--muted)}
+.qbar-row,.qtrend-row{display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px}
+.qbar-label{flex:0 0 84px; font-weight:700}
+.qbar-track{flex:1; height:9px; background:#eef0f7; border-radius:999px; overflow:hidden; min-width:40px}
+.qbar-fill{display:block; height:100%; border-radius:999px; transition:width .4s ease}
+.qbar-fill.low{background:#e11d48} .qbar-fill.mid{background:#d97706} .qbar-fill.high{background:#16a34a}
+.qbar-val{flex:0 0 16px; text-align:right; font-weight:800}
+.qbar-val.low{color:#e11d48} .qbar-val.mid{color:#d97706} .qbar-val.high{color:#16a34a}
+
+.qtrend-row{flex-wrap:wrap}
+.spark{display:inline-flex; align-items:flex-end; gap:2px; height:20px; flex:0 0 auto}
+.spark-bar{width:4px; background:var(--primary); opacity:.5; border-radius:1px}
+.qtrend-diff{font-size:11px; font-weight:800; flex:0 0 34px; text-align:right; color:var(--muted)}
+.qtrend-diff.up{color:var(--good)} .qtrend-diff.down{color:var(--danger)}
+.qtrend-avg{font-size:11px; color:var(--muted); flex:0 0 auto}
+
+/* 독자 반응 아이템 */
+.rr-item{border-radius:12px; padding:11px 13px; margin-top:8px; border:1px solid var(--line); background:#fff}
+.rr-head{font-size:12px; font-weight:800; margin-bottom:4px}
+.rr-note{font-size:14px; line-height:1.55}
+.rr-good{background:#eef8f1; border-color:#cdeed9} .rr-good .rr-head{color:var(--good)}
+.rr-bored{background:#f4f4f7; border-color:#e2e2ea} .rr-bored .rr-head{color:#6b6f86}
+.rr-confused{background:#fff5ec; border-color:#ffddb8} .rr-confused .rr-head{color:var(--warn)}
+.rr-curious{background:#eef0fd; border-color:#d2cff5} .rr-curious .rr-head{color:var(--primary)}
+.rr-generic{background:#fdf0ee; border-color:#f6d9d3} .rr-generic .rr-head{color:var(--danger)}
+.rr-gap{background:#fdf6e3; border-color:#f0e0b0} .rr-gap .rr-head{color:#8a6d1a}
+
+/* ---------- 표현 스캔 ---------- */
+.scan-table{display:grid; gap:8px; margin-top:4px}
+.scan-row{display:grid; grid-template-columns:88px 1fr; gap:4px 8px; background:#fbfbfe;
+  border:1px solid var(--line); border-radius:10px; padding:9px 11px; font-size:13px}
+.scan-k{font-weight:800; color:#40435c}
+.scan-v code{background:#eef0f7; border-radius:5px; padding:1px 6px; font-size:12px; margin-right:3px;
+  font-family:inherit}
+.scan-a{grid-column:1 / -1; color:var(--muted); font-size:12.5px}
+
+/* ---------- 다중 수정 루프 ---------- */
+.pass-dots{display:flex; gap:6px; margin-bottom:12px}
+.pass-dot{width:26px; height:26px; border-radius:50%; background:#eef0f7; color:var(--muted);
+  font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center}
+.pass-dot.now{background:var(--primary); color:#fff}
+.pass-dot.done{background:#cdeed9; color:#16a34a}
+.diff-pair{display:grid; gap:10px; margin-top:10px}
+.diff-col{border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#fff}
+.diff-h{font-size:12px; font-weight:800; padding:7px 11px; display:flex; justify-content:space-between}
+.diff-h span{font-weight:600; opacity:.75}
+.diff-h.before{background:#fdf0ee; color:#7a3b32}
+.diff-h.after{background:#eaf7ef; color:#245c39}
+.diff-body{padding:11px; font-size:13.5px; line-height:1.6; white-space:pre-wrap}
+@media (min-width:560px){ .diff-pair{grid-template-columns:1fr 1fr} }
+
+/* ---------- 세그먼트 (실전 탭) ---------- */
+.seg-row{display:flex; gap:8px; background:#eef0f7; border-radius:12px; padding:4px; margin-bottom:14px}
+.seg{flex:1; border:none; background:none; font-family:inherit; font-size:13.5px; font-weight:700;
+  color:var(--muted); padding:9px 6px; border-radius:9px; cursor:pointer}
+.seg.active{background:#fff; color:var(--primary); box-shadow:0 1px 4px rgba(40,42,80,.1)}
+.seg-n{display:inline-block; background:var(--primary); color:#fff; font-size:10px; font-weight:800;
+  border-radius:999px; padding:1px 6px; margin-left:5px; vertical-align:1px}
+
+/* ---------- A/B 드릴 ---------- */
+.drill-dim{font-size:11.5px; font-weight:800; color:var(--primary); background:var(--primary-soft);
+  display:inline-block; padding:4px 11px; border-radius:999px; margin-bottom:10px}
+.drill-q{font-size:15.5px; font-weight:800; margin-bottom:14px; line-height:1.5}
+.drill-opt{display:flex; gap:10px; width:100%; text-align:left; background:#fff; cursor:pointer;
+  border:2px solid var(--line); border-radius:13px; padding:13px; margin-bottom:10px;
+  font-family:inherit; font-size:14.5px; line-height:1.6; color:var(--ink);
+  transition:border-color .15s, background .15s, transform .08s}
+.drill-opt:active{transform:scale(.99)}
+.drill-tag{flex:0 0 24px; height:24px; border-radius:50%; background:#eef0f7; color:var(--muted);
+  font-weight:800; font-size:12px; display:flex; align-items:center; justify-content:center}
+.drill-text{flex:1; white-space:pre-wrap}
+.drill-opt.picked{border-color:var(--primary)}
+.drill-opt.correct{border-color:var(--good); background:#eef8f1}
+.drill-opt.correct .drill-tag{background:var(--good); color:#fff}
+.drill-opt.wrong{border-color:var(--danger); background:#fdf0ee}
+.drill-opt.wrong .drill-tag{background:var(--danger); color:#fff}
+.drill-opt.dim{opacity:.55}
+.drill-opt:disabled{cursor:default}
+.drill-result{font-size:15px; font-weight:800; text-align:center; padding:11px; border-radius:11px;
+  margin:4px 0 4px}
+.drill-result.ok{background:#eef8f1; color:var(--good)}
+.drill-result.no{background:#fdf0ee; color:var(--danger)}
+
 /* ---------- iOS 설치 안내 시트 ---------- */
 .install-sheet{
   position:fixed; inset:0; z-index:50; display:flex; align-items:flex-end;
@@ -343,4 +437,4 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
   border-radius:6px; font-size:15px; vertical-align:-4px}
 .install-card .btn.primary{margin-top:6px}
 
-@media (max-width:360px){ #skill-grid{grid-template-columns:1fr} }
+@media (max-width:360px){ .skill-group-grid{grid-template-columns:1fr} }

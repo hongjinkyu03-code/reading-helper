@@ -14,8 +14,11 @@
   const esc = (s) => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  /* 트랙 순환 패턴 (Day 2부터): 쓰기4 · 말하기2 · 복습1 = 7일 주기 */
-  const TRACK_PATTERN = ["write", "write", "speak", "write", "write", "speak", "review"];
+  /* 트랙 순환 패턴 (Day 2부터): 구조2 · 품질2 · 말하기2 · 복습1 = 7일 주기
+     구조(문장·문단)와 품질(개연성·흥미·어휘)을 번갈아 배치해 서로를 보강한다. */
+  const TRACK_PATTERN = ["write", "quality", "speak", "write", "quality", "speak", "review"];
+  const TRACK_NAMES = { write: "구조", quality: "품질", speak: "말하기", review: "복습·통합", diagnostic: "진단" };
+  const TRACK_ICONS = { write: "✍️ 구조", quality: "✨ 품질", speak: "🎙️ 말하기", review: "🔁 복습·통합" };
 
   /* ----------------------------- 상태 ----------------------------- */
   function defaultState() {
@@ -36,6 +39,8 @@
       activePractice: null,   // 진행 중 실전 연습
       diagnosis: null,        // AI 진단 결과 { status, level, summary, strengths, weaknesses, advice }
       plan: {},               // 맞춤 커리큘럼 { day: skillId }
+      quality: [],            // 품질 6축 추이 [{date, day, scores, avg}]
+      drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
       aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
       settings: {
         aiEnabled: false,
@@ -62,6 +67,8 @@
     if (typeof set.aiEnabled !== "boolean") set.aiEnabled = false;
     if (typeof set.aiSaver !== "boolean") set.aiSaver = true;
     if (!s.plan) s.plan = {};
+    if (!s.quality) s.quality = [];
+    if (!s.drills) s.drills = { done: [], correct: 0, total: 0 };
     if (!s.aiUsage) s.aiUsage = { date: "", count: 0 };
     if (!set.provider) set.provider = "gemini";
     if (!set.gemini) set.gemini = { key: "", model: "gemini-2.5-flash" };
@@ -129,6 +136,63 @@
     }
     return sents.length ? best : 0;
   }
+  /* ---- 로컬 품질 스캔 — 사전 기반. API 없이 품질 힌트를 주고,
+         AI 호출 시에는 프롬프트에 넣어 1회 호출의 정확도를 올린다. ---- */
+  function findAll(text, list) {
+    const hits = [];
+    (list || []).forEach(w => { if (text.indexOf(w) >= 0) hits.push(w); });
+    return hits;
+  }
+  function localQualityScan(text) {
+    const t = String(text || "");
+    const m = metrics(t);
+    const formal = findAll(t, LEXICON.formalMarkers);
+    const casual = findAll(t, LEXICON.casualMarkers);
+    return {
+      cliches: findAll(t, LEXICON.cliches),
+      vagueNouns: findAll(t, LEXICON.vagueNouns),
+      intensifiers: findAll(t, LEXICON.intensifiers),
+      hedges: findAll(t, LEXICON.hedges),
+      emptyPatterns: findAll(t, LEXICON.emptyPatterns),
+      registerMix: formal.length > 0 && casual.length > 0,
+      formal, casual,
+      senses: m.senses, numbers: m.numbers, emotionWords: m.emotionWords,
+      sameEnding: m.sameEnding
+    };
+  }
+  /* 스캔 결과를 사람이 읽는 한 덩어리로 (오프라인 품질 힌트) */
+  function qualityScanHTML(scan) {
+    const rows = [];
+    const line = (emoji, label, arr, advice) => {
+      if (!arr.length) return;
+      rows.push(`<div class="scan-row"><span class="scan-k">${emoji} ${label}</span>
+        <span class="scan-v">${arr.slice(0, 5).map(w => `<code>${esc(w)}</code>`).join(" ")}${arr.length > 5 ? ` +${arr.length - 5}` : ""}</span>
+        <span class="scan-a">${esc(advice)}</span></div>`);
+    };
+    line("🗿", "클리셰", scan.cliches, "닳은 표현입니다. 실제 관찰로 바꾸세요.");
+    line("🌫️", "막연한 명사", scan.vagueNouns, "‘구체적으로 무엇?’에 답해 교체하세요.");
+    line("📢", "강조 부사", scan.intensifiers, "지우고 동사·명사를 더 정확하게 바꾸세요.");
+    line("🌀", "완충 표현", scan.hedges, "판단이 흐려집니다. 단언할 수 있는지 보세요.");
+    line("🫙", "빈 문형", scan.emptyPatterns, "정보가 없는 문장입니다. 구체적 판단으로.");
+    if (scan.registerMix) {
+      rows.push(`<div class="scan-row"><span class="scan-k">🎭 문체 혼용</span>
+        <span class="scan-v">${scan.formal.slice(0,2).map(w=>`<code>${esc(w)}</code>`).join(" ")} ↔ ${scan.casual.slice(0,2).map(w=>`<code>${esc(w)}</code>`).join(" ")}</span>
+        <span class="scan-a">격식체와 구어체가 섞였습니다. 하나로 통일하세요.</span></div>`);
+    }
+    if (scan.emotionWords >= 2 && scan.senses <= 1) {
+      rows.push(`<div class="scan-row"><span class="scan-k">🎨 감각 부족</span>
+        <span class="scan-v">감정어 ${scan.emotionWords} vs 감각어 ${scan.senses}</span>
+        <span class="scan-a">감정 단어를 그 순간의 감각으로 바꾸세요.</span></div>`);
+    }
+    if (scan.sameEnding >= 3) {
+      rows.push(`<div class="scan-row"><span class="scan-k">🔁 종결어미 반복</span>
+        <span class="scan-v">${scan.sameEnding}문장 연속</span>
+        <span class="scan-a">낭독 시 단조로워집니다. 하나를 다른 형태로.</span></div>`);
+    }
+    if (!rows.length) return `<p class="muted small">표면 지표에서는 걸리는 표현이 없습니다. 아래 독자 리포트로 내용을 점검해보세요.</p>`;
+    return `<div class="scan-table">${rows.join("")}</div>`;
+  }
+
   /* 규칙 기반 진단 — API 없이 약점 후보를 커리큘럼 기술로 매핑 */
   function localDiagnose(text) {
     const m = metrics(text);
@@ -198,9 +262,14 @@
   }
 
   /* ----------------------------- 스케줄러 ----------------------------- */
+  /* 구조 트랙(문장·문단·글 전체)과 품질 트랙(개연성·흥미·어휘…)을 함께 굴린다 */
+  const ALL_LESSONS = CURRICULUM.concat(QUALITY_LESSONS);
   const WRITE_POOL = CURRICULUM.filter(l => l.track === "write");
   const SPEAK_POOL = CURRICULUM.filter(l => l.track === "speak");
-  const byId = (id) => CURRICULUM.find(l => l.id === id);
+  const QUALITY_POOL = QUALITY_LESSONS;
+  const POOLS = { write: WRITE_POOL, speak: SPEAK_POOL, quality: QUALITY_POOL };
+  const byId = (id) => ALL_LESSONS.find(l => l.id === id);
+  const dimOf = (key) => QUALITY_DIMS.find(d => d.key === key);
 
   function trackForDay(day) {
     if (day <= 1) return "diagnostic";
@@ -209,7 +278,7 @@
 
   function weakestSkill(track) {
     // rating===1(더 필요) 인 기술 중 가장 오래전에 다룬 것 (간격 반복 인출)
-    const pool = track === "speak" ? SPEAK_POOL : WRITE_POOL;
+    const pool = POOLS[track] || WRITE_POOL;
     const weak = pool
       .filter(l => state.skills[l.id] && state.skills[l.id].rating === 1)
       .sort((a, b) => (state.skills[a.id].lastDay || 0) - (state.skills[b.id].lastDay || 0));
@@ -217,7 +286,16 @@
   }
 
   function pickLesson(day, track) {
-    const pool = track === "speak" ? SPEAK_POOL : WRITE_POOL;
+    const pool = POOLS[track] || WRITE_POOL;
+    // 품질 트랙은 독자 리포트에서 가장 낮은 축을 우선 겨냥한다(의도적 연습)
+    if (track === "quality") {
+      const weakDim = weakestQualityDim();
+      if (weakDim) {
+        const cands = pool.filter(l => l.dim === weakDim)
+          .sort((a, b) => ((state.skills[a.id] || {}).lastDay || 0) - ((state.skills[b.id] || {}).lastDay || 0));
+        if (cands.length) return cands[0];
+      }
+    }
     // 진단으로 만든 맞춤 커리큘럼이 있으면 그 순서를 우선한다
     const planned = state.plan && state.plan[String(day)];
     if (planned) {
@@ -236,6 +314,174 @@
       return da - db;
     });
     return sorted[0] || pool[state.ptr[track] % pool.length];
+  }
+
+  /* ==================== 독자 리포트 · 품질 6축 ====================
+   * AI를 '채점관'이 아니라 '독자'로 쓴다. 점수보다 중요한 것은
+   * "여기서 지루해졌다 / 여기서 왜?라는 의문이 생겼다"는 반응이다.
+   * 제출당 1회 호출로 6축 점수 + 독자 반응 + 최우선 수정을 한꺼번에 받는다.
+   * ============================================================== */
+  const QUALITY_SYSTEM = `당신은 글의 '수준'을 평가하는 독자이자 글쓰기 코치입니다. 구조적 결함(오탈자·문법)이 아니라
+글의 질(개연성·흥미·어휘·밀도·목소리·독자 배려)을 판단합니다.
+
+## 가장 중요한 원칙
+당신은 채점관이 아니라 **한 명의 독자**입니다. "3점입니다"는 학습자를 못 고치게 합니다.
+"여기서 지루해졌어요", "여기서 '왜?'라는 의문이 생겼는데 답이 안 나왔어요",
+"이 문장은 누가 무엇에 대해 써도 되는 말이에요" — 이렇게 **읽는 동안 실제로 일어난 일**을 말하세요.
+
+## 6개 축 (1~5점)
+- coherence(개연성): 앞 문장이 뒤 문장을 벌어들이는가. 논리 비약이 없는가. 독자의 질문에 제때 답하는가.
+- interest(흥미): 계속 읽고 싶은가. 긴장·의외성·이해관계·구체적 장면이 있는가.
+- diction(어휘): 그 자리에 그 단어가 맞는가. 막연한 말·클리셰·문체 혼용이 없는가.
+- density(밀도): 매 문장이 새 정보를 주는가. 반복·빈 문장이 없는가. 뻔하지 않은가.
+- voice(목소리): 쓴 사람이 보이는가. 태도가 일관된가.
+- reader(독자 배려): 독자가 아는 것/모르는 것을 구분했는가.
+점수 기준: 1=심각한 문제, 2=약함, 3=보통(무난하지만 인상 없음), 4=좋음, 5=뛰어남.
+후하게 주지 마세요. 대부분의 초고는 2~3점입니다. 5점은 정말 뛰어날 때만.
+
+## 반드시 아래 JSON만 출력 (코드블록·설명·인사말 금지)
+{
+  "scores": {"coherence":3,"interest":2,"diction":3,"density":2,"voice":3,"reader":4},
+  "oneLine": "독자로서 이 글을 읽은 소감 한 문장. 솔직하게.",
+  "readerReport": [
+    {"type":"good|bored|confused|curious|generic|gap","quote":"학습자 글의 실제 인용","note":"읽는 동안 무슨 일이 일어났는지 한두 문장"}
+  ],
+  "topFix": {"dim":"6축 중 하나의 key","quote":"가장 먼저 고쳐야 할 학습자의 문장","why":"왜 이것이 최우선인지","rewrite":"고친 예시 한 문장"},
+  "nextFocus": {"dim":"다음에 훈련할 축 key","task":"이 학습자에게 지금 필요한 구체적 연습 한 가지"}
+}
+readerReport는 3~5개. type의 뜻 —
+good(여기서 좋았다) / bored(지루해졌다) / confused(못 따라갔다) /
+curious(궁금해졌다) / generic(누구나 쓸 수 있는 말이다) / gap(전제가 빠져 막혔다).
+반드시 최소 1개는 good을 포함하고, 인용은 학습자 글의 실제 표현이어야 합니다.`;
+
+  function qualityUserMessage(text, ctx) {
+    const m = metrics(text), scan = localQualityScan(text);
+    const flag = (label, arr) => arr.length ? `${label}: ${arr.join(", ")}` : "";
+    const flags = [
+      flag("클리셰", scan.cliches), flag("막연한 명사", scan.vagueNouns),
+      flag("강조 부사", scan.intensifiers), flag("완충 표현", scan.hedges),
+      flag("빈 문형", scan.emptyPatterns),
+      scan.registerMix ? `문체 혼용: ${scan.formal.join(",")} ↔ ${scan.casual.join(",")}` : ""
+    ].filter(Boolean).join(" / ") || "특별히 걸리는 표현 없음";
+    return `[글의 맥락] ${ctx || "자유 글쓰기"}
+[학습자 목표] ${state.goals || "(밝히지 않음)"}
+
+[기계 분석 참고치 — 그대로 나열하지 말고 판단 근거로만]
+문장 ${m.sentences}개 / 평균 ${m.mean}자(편차 ${m.sd}) / 감각어 ${m.senses} / 수치 ${m.numbers} / 동일종결어미연속 ${m.sameEnding}
+사전 탐지: ${flags}
+
+[학습자의 글]
+${text}
+
+이 글을 독자로서 읽고, 6축 점수와 독자 리포트를 JSON으로 출력하세요.`;
+  }
+
+  function weakestQualityDim() {
+    // 최근 3회 리포트의 평균이 가장 낮은 축
+    const recent = (state.quality || []).slice(-3);
+    if (!recent.length) return null;
+    let best = null, bestVal = 99;
+    QUALITY_DIMS.forEach(d => {
+      const vals = recent.map(r => r.scores && r.scores[d.key]).filter(v => typeof v === "number");
+      if (!vals.length) return;
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      if (avg < bestVal) { bestVal = avg; best = d.key; }
+    });
+    return bestVal <= 3.5 ? best : null;
+  }
+
+  function qualityAvg(scores) {
+    const vals = QUALITY_DIMS.map(d => scores[d.key]).filter(v => typeof v === "number");
+    return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+  }
+
+  const RR_STYLE = {
+    good:     ["rr-good", "👍", "좋았던 지점"],
+    bored:    ["rr-bored", "😐", "지루해진 지점"],
+    confused: ["rr-confused", "❓", "못 따라간 지점"],
+    curious:  ["rr-curious", "🤔", "궁금해진 지점"],
+    generic:  ["rr-generic", "🫥", "누구나 쓸 수 있는 말"],
+    gap:      ["rr-gap", "🕳️", "전제가 빠진 지점"]
+  };
+
+  function renderQualityReport(rep, opts) {
+    if (!rep || !rep.scores) return "";
+    const o = opts || {};
+    const bars = QUALITY_DIMS.map(d => {
+      const v = rep.scores[d.key] || 0;
+      const pct = Math.max(0, Math.min(100, v / 5 * 100));
+      const cls = v <= 2 ? "low" : v === 3 ? "mid" : "high";
+      return `<div class="qbar-row" title="${esc(d.detail)}">
+        <span class="qbar-label">${d.emoji} ${esc(d.label)}</span>
+        <span class="qbar-track"><span class="qbar-fill ${cls}" style="width:${pct}%"></span></span>
+        <span class="qbar-val ${cls}">${v}</span>
+      </div>`;
+    }).join("");
+    const items = (rep.readerReport || []).map(r => {
+      const st = RR_STYLE[r.type] || RR_STYLE.good;
+      return `<div class="rr-item ${st[0]}">
+        <div class="rr-head">${st[1]} ${st[2]}</div>
+        ${r.quote ? `<div class="quote-line">“${esc(r.quote)}”</div>` : ""}
+        <div class="rr-note">${esc(r.note || "")}</div>
+      </div>`;
+    }).join("");
+    const tf = rep.topFix;
+    const nf = rep.nextFocus;
+    const avg = qualityAvg(rep.scores);
+    return `
+      ${rep.oneLine ? `<div class="fb-block fb-now"><span class="fb-h">🗣️ 독자의 한마디</span>${esc(rep.oneLine)}</div>` : ""}
+      <div class="qscore-card">
+        <div class="qscore-head">
+          <span class="qscore-title">품질 6축</span>
+          <span class="qscore-avg">평균 <b>${avg.toFixed(1)}</b> / 5</span>
+        </div>
+        ${bars}
+      </div>
+      ${items ? `<div class="section-label">읽는 동안 무슨 일이 있었나</div>${items}` : ""}
+      ${tf ? `<div class="fb-block fb-surgery">
+        <span class="fb-h">✂️ 가장 먼저 고칠 것 ${tf.dim && dimOf(tf.dim) ? `· ${esc(dimOf(tf.dim).label)}` : ""}</span>
+        ${tf.quote ? `<div class="sg before"><span class="sg-tag">전</span>${esc(tf.quote)}</div>` : ""}
+        ${tf.rewrite ? `<div class="sg after"><span class="sg-tag">후</span>${esc(tf.rewrite)}</div>` : ""}
+        ${tf.why ? `<div class="sg why">→ ${esc(tf.why)}</div>` : ""}
+      </div>` : ""}
+      ${nf ? `<div class="fb-block fb-next">
+        <span class="fb-h">➡️ 다음에 훈련할 것 ${nf.dim && dimOf(nf.dim) ? `· ${esc(dimOf(nf.dim).label)}` : ""}</span>
+        ${esc(nf.task || "")}
+      </div>` : ""}
+      ${o.compare ? o.compare : ""}`;
+  }
+
+  async function requestQualityReport(slotId, text, ctx, onDone) {
+    const slot = $("#" + slotId);
+    if (slot) slot.innerHTML = `<span class="spinner"></span>독자가 당신의 글을 읽고 있어요…`;
+    try {
+      const raw = await callAI(QUALITY_SYSTEM, qualityUserMessage(text, ctx), 2048);
+      const j = extractJSON(raw);
+      if (!j.scores) throw new Error("점수가 없습니다");
+      if (onDone) onDone(j);
+      const s2 = $("#" + slotId);
+      if (s2) s2.innerHTML = renderQualityReport(j);
+      return j;
+    } catch (e) {
+      const s2 = $("#" + slotId);
+      if (s2) s2.innerHTML = `<span style="color:var(--danger)">독자 리포트 실패: ${esc(e.message)}</span>
+        <button class="btn ghost small" id="${slotId}-retry">다시 시도</button>`;
+      const rb = $("#" + slotId + "-retry");
+      if (rb) rb.addEventListener("click", () => requestQualityReport(slotId, text, ctx, onDone));
+      return null;
+    }
+  }
+
+  /* 세션에서 받은 리포트를 추이 기록에 남긴다 */
+  function recordQuality(rep, meta) {
+    if (!rep || !rep.scores) return;
+    state.quality = state.quality || [];
+    state.quality.push({
+      date: todayStr(), day: meta && meta.day, lessonId: meta && meta.lessonId,
+      pass: meta && meta.pass, scores: rep.scores, avg: qualityAvg(rep.scores),
+      oneLine: rep.oneLine || ""
+    });
+    save();
   }
 
   function buildReviewLesson(day) {
@@ -277,7 +523,9 @@
       day, lessonId: lesson.id, track: lesson.track,
       category: lesson.category, skill: lesson.skill,
       stage: "brief", submission: "", noticed: "", retry: "",
+      revisions: [], revisePass: 0, qualityReport: null, qualityReportFinal: null,
       aiFeedback: "", aiRetryFeedback: "", summary: "", selfRating: null,
+      dim: lesson.dim || "",
       _lesson: lesson.track === "review" ? lesson : null // 복습 레슨은 동적이라 저장
     };
     if (lesson.track === "speak") {
@@ -338,6 +586,7 @@
       notice: [viewNotice, wireNotice],
       feedback: [viewFeedback, wireFeedback],
       retry: [viewRetry, wireRetry],
+      "revise-more": [viewReviseMore, wireReviseMore],
       wrap: [viewWrap, wireWrap],
       done: [viewDone, wireDone]
     };
@@ -425,16 +674,19 @@
   "summary": "총평 두 문장. 학습자의 글에서 실제로 관찰된 특징을 근거로.",
   "strengths": [{"point":"강점 이름","quote":"학습자 글에서 그대로 인용한 짧은 구절","why":"왜 좋은지 이론적으로 한 문장"}],
   "weaknesses": [{"skillId":"아래 목록의 id","label":"약점 이름","quote":"문제가 드러난 학습자 글의 짧은 인용","why":"무엇이 왜 문제인지 한두 문장","fix":"어떻게 고치면 되는지 한 문장"}],
-  "writeFocus": ["글쓰기 기술 id 4개 — 첫 주에 다룰 순서대로"],
+  "writeFocus": ["구조 기술 id 2개 — 첫 주에 다룰 순서대로"],
   "speakFocus": ["말하기 기술 id 2개 — 순서대로"],
+  "qualityFocus": ["품질 기술 id 2개 — 이 학습자의 글에서 가장 시급한 품질 축부터"],
   "advice": "첫 주에 특히 신경 쓸 것을 3~4문장으로. 학습자의 목표와 연결해서."
 }
 strengths는 1~2개, weaknesses는 2~3개. quote는 반드시 학습자 글의 실제 표현이어야 합니다(없으면 빈 문자열).
-skillId·writeFocus·speakFocus는 반드시 주어진 id 목록에서만 고르세요.`;
+skillId·writeFocus·speakFocus·qualityFocus는 반드시 주어진 id 목록에서만 고르세요.
+weaknesses의 skillId는 구조·품질 목록 어디서든 고를 수 있습니다.`;
 
   function diagUserMessage(text, goal) {
-    const wl = CURRICULUM.filter(l => l.track === "write").map(l => `${l.id}: ${l.skill}`).join("\n");
-    const sl = CURRICULUM.filter(l => l.track === "speak").map(l => `${l.id}: ${l.skill}`).join("\n");
+    const wl = WRITE_POOL.map(l => `${l.id}: ${l.skill}`).join("\n");
+    const sl = SPEAK_POOL.map(l => `${l.id}: ${l.skill}`).join("\n");
+    const ql = QUALITY_POOL.map(l => `${l.id}: ${l.skill} [${(dimOf(l.dim) || {}).label || l.dim}]`).join("\n");
     const d = localDiagnose(text), m = d.metrics;
     return `[학습자 목표]
 ${goal || "(밝히지 않음)"}
@@ -447,11 +699,14 @@ ${text}
 군더더기후보 ${m.fillers} / 완충표현 ${m.hedges} / 피동 ${m.passives} / 접속사 ${m.connectors} / 이어붙임 ${m.conjTails}
 감정어 ${m.emotionWords} / 감각어 ${m.senses} / 수치표현 ${m.numbers} / 동일종결어미연속 ${m.sameEnding}
 
-[글쓰기 기술 id 목록]
+[구조 기술 id 목록 — 문장·문단·글 전체]
 ${wl}
 
 [말하기 기술 id 목록]
 ${sl}
+
+[품질 기술 id 목록 — 개연성·흥미·어휘·밀도·목소리·독자 배려]
+${ql}
 
 위 학습자를 진단하고 맞춤 커리큘럼을 JSON으로 설계하세요.`;
   }
@@ -465,14 +720,24 @@ ${sl}
     return JSON.parse(t.slice(a, b + 1));
   }
 
-  function buildPlanFromFocus(writeFocus, speakFocus) {
-    const wIds = (writeFocus || []).filter(id => WRITE_POOL.find(l => l.id === id));
-    const sIds = (speakFocus || []).filter(id => SPEAK_POOL.find(l => l.id === id));
+  /* 진단 결과를 실제 트랙 패턴의 날짜에 배치한다(패턴이 바뀌어도 따라간다) */
+  function daysForTrack(track, fromDay, toDay) {
+    const out = [];
+    for (let d = fromDay; d <= toDay; d++) if (trackForDay(d) === track) out.push(d);
+    return out;
+  }
+  function buildPlanFromFocus(writeFocus, speakFocus, qualityFocus) {
+    const pick = (ids, pool) => (ids || []).filter(id => pool.find(l => l.id === id));
+    const map = [
+      ["write", pick(writeFocus, WRITE_POOL)],
+      ["speak", pick(speakFocus, SPEAK_POOL)],
+      ["quality", pick(qualityFocus, QUALITY_POOL)]
+    ];
     const plan = {};
-    // TRACK_PATTERN(day2~): write,write,speak,write,write,speak,review
-    const writeDays = [2, 3, 5, 6], speakDays = [4, 7];
-    writeDays.forEach((d, i) => { if (wIds[i]) plan[String(d)] = wIds[i]; });
-    speakDays.forEach((d, i) => { if (sIds[i]) plan[String(d)] = sIds[i]; });
+    map.forEach(([track, ids]) => {
+      const days = daysForTrack(track, 2, 8);
+      days.forEach((d, i) => { if (ids[i]) plan[String(d)] = ids[i]; });
+    });
     return plan;
   }
 
@@ -493,7 +758,7 @@ ${sl}
         summary: j.summary || "", strengths: j.strengths || [],
         weaknesses: weaknesses, advice: j.advice || "", date: todayStr()
       };
-      state.plan = buildPlanFromFocus(j.writeFocus, j.speakFocus);
+      state.plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus);
       // 약점을 기술 추적에 심어 간격 반복이 다시 꺼내게 한다
       weaknesses.forEach(w => {
         state.skills[w.skillId] = { rating: 1, seen: 0, lastDay: 0 };
@@ -515,8 +780,8 @@ ${sl}
         weaknesses: ws, advice: "AI 키를 설정하면 글의 내용까지 짚는 구체적 진단을 받을 수 있어요. 지금은 표면 지표 기준 커리큘럼으로 시작합니다.",
         date: todayStr()
       };
-      state.plan = buildPlanFromFocus(ws.filter(w => byId(w.skillId).track === "write").map(w => w.skillId),
-                                      ws.filter(w => byId(w.skillId).track === "speak").map(w => w.skillId));
+      const ofTrack = (t) => ws.filter(w => (byId(w.skillId) || {}).track === t).map(w => w.skillId);
+      state.plan = buildPlanFromFocus(ofTrack("write"), ofTrack("speak"), ofTrack("quality"));
       ws.forEach(w => { state.skills[w.skillId] = { rating: 1, seen: 0, lastDay: 0 }; });
     }
     _diagRunning = false;
@@ -547,8 +812,8 @@ ${sl}
       if (t === "review") { planRows.push(`<li><b>Day ${day}</b> · 🔁 복습·통합</li>`); continue; }
       const sid = state.plan[String(day)];
       const l = sid ? byId(sid) : null;
-      const icon = t === "speak" ? "🎙️" : "✍️";
-      planRows.push(`<li><b>Day ${day}</b> · ${icon} ${l ? esc(l.skill) : (t === "speak" ? "말하기" : "글쓰기")}</li>`);
+      const icon = (TRACK_ICONS[t] || "").split(" ")[0] || "✍️";
+      planRows.push(`<li><b>Day ${day}</b> · ${icon} ${l ? esc(l.skill) : esc(TRACK_NAMES[t] || t)}</li>`);
     }
     const badge = d.source === "ai"
       ? `<span class="src-badge ai">AI 진단</span>`
@@ -574,7 +839,7 @@ ${sl}
   function viewStart() {
     const nextDay = state.currentDay + 1;
     const track = trackForDay(nextDay);
-    const trackName = { write: "글쓰기", speak: "말하기", review: "복습·통합" }[track] || "";
+    const trackName = TRACK_NAMES[track] || "";
     const recall = lastLearnedLine();
     const doneToday = state.activity[todayStr()] ? true : false;
     // 진단 직후에는 진단 결과 + 맞춤 커리큘럼을 보여준다
@@ -585,7 +850,7 @@ ${sl}
         const plan = [];
         for (let d = 2; d <= 8; d++) {
           const t = trackForDay(d);
-          const nm = { write: "✍️ 글쓰기", speak: "🎙️ 말하기", review: "🔁 복습·통합" }[t];
+          const nm = TRACK_ICONS[t] || t;
           plan.push(`<li><b>Day ${d}</b> · ${nm}</li>`);
         }
         preview = `
@@ -614,7 +879,7 @@ ${sl}
 
   /* ---- brief: 목표·미니레슨·과제 ---- */
   function viewBrief(sess, L) {
-    const trackName = { write: "글쓰기", speak: "말하기", review: "복습·통합" }[L.track];
+    const trackName = TRACK_NAMES[L.track];
     const recall = lastLearnedLine();
     const examplePair = (L.bad || L.good) ? `
       <div class="example-pair">
@@ -804,8 +1069,27 @@ ${sl}
   /* ---- feedback ---- */
   function viewFeedback(sess, L) {
     const useAI = aiReady();
+    const isQuality = L.track === "quality";
     const observation = localObservation(L, sess.submission);
-    const aiSlot = useAI ? aiSlotHTML("ai-fb", "ai-ask", !!sess.aiFeedback) : aiOffHint();
+    const scan = localQualityScan(sess.submission);
+    /* 품질 레슨은 독자 리포트를, 구조 레슨은 기술 피드백을 기본으로 한다.
+       어느 쪽이든 반대쪽도 버튼으로 추가 요청할 수 있다(각 1회 호출). */
+    const primary = isQuality
+      ? qualitySlotHTML(!!sess.qualityReport)
+      : (useAI ? aiSlotHTML("ai-fb", "ai-ask", !!sess.aiFeedback) : aiOffHint());
+    const secondary = !useAI ? "" : (isQuality
+      ? (sess.aiFeedback
+          ? `<div id="ai-fb" class="ai-fb-wrap">${renderAIFeedback(sess.aiFeedback)}</div>`
+          : `<div class="ai-ask-box"><div class="ai-ask-text">🔧 <b>기술 피드백</b>도 받아볼까요?
+               <span class="muted" style="font-size:12px">오늘 기술(${esc(L.skill)}) 관점 · 호출 1회</span></div>
+             <button class="btn ghost small" id="ai-ask" style="margin:0">기술 피드백</button></div>
+             <div id="ai-fb" class="ai-fb-wrap"></div>`)
+      : (sess.qualityReport
+          ? `<div id="q-fb">${renderQualityReport(sess.qualityReport)}</div>`
+          : `<div class="ai-ask-box"><div class="ai-ask-text">🗣️ <b>독자 리포트</b>도 받아볼까요?
+               <span class="muted" style="font-size:12px">개연성·흥미·어휘 6축 평가 · 호출 1회</span></div>
+             <button class="btn btn-secondary small" id="q-ask" style="margin:0">독자 리포트</button></div>
+             <div id="q-fb"></div>`));
     return `
     <div class="session-step">
       <span class="step-kicker ${L.track}">DAY ${sess.day} · 피드백</span>
@@ -816,71 +1100,206 @@ ${sl}
         ${sess.noticed ? "게다가 스스로 문제를 짚어낸 점이 특히 좋습니다 — 그게 성장의 핵심이에요." : "완성 자체가 산출(output) 훈련이에요."}
       </div>
 
-      <div class="fb-block fb-now">
-        <span class="fb-h">📊 텍스트 분석 (기기에서 계산)</span>
-        ${observation}
-      </div>
-
-      ${aiSlot}
+      ${primary}
+      ${secondary}
 
       <details class="hint-fold">
-        <summary>코치 기본 힌트 보기</summary>
+        <summary>기기 분석 · 코치 힌트 보기 (AI 없이 계산)</summary>
+        <div class="fb-block fb-now" style="margin-top:4px">
+          <span class="fb-h">📊 텍스트 지표</span>${observation}
+        </div>
+        <div class="fb-block fb-now">
+          <span class="fb-h">🔍 표현 스캔</span>${qualityScanHTML(scan)}
+        </div>
         ${(L.hints || []).slice(0, 2).map(h => `<div class="notice-q">→ ${esc(h)}</div>`).join("")}
       </details>
 
       <div class="fb-block" style="background:#f6f7fe;border:1px solid var(--line)">
-        <span class="fb-h" style="color:var(--primary)">✏️ 다음 재도전</span>
-        ${esc(L.retry)}
+        <span class="fb-h" style="color:var(--primary)">✏️ 다음 단계 · 수정</span>
+        ${esc(revisePassInfo(L, 1).instruction)}
       </div>
 
-      <button class="btn primary" id="to-retry">그 부분만 다시 쓰기</button>
-      <button class="btn ghost small" id="skip-retry">재도전 건너뛰기</button>
+      <button class="btn primary" id="to-retry">고쳐 쓰기 시작</button>
+      <button class="btn ghost small" id="skip-retry">건너뛰고 마무리</button>
     </div>`;
+  }
+  function qualitySlotHTML(cached) {
+    if (cached) return `<div id="q-fb"></div>`;
+    if (!aiReady()) {
+      return `<div class="fb-block fb-improve"><span class="fb-h">🗣️ 독자 리포트</span>
+        개연성·흥미·어휘 같은 <b>글의 수준</b>은 기계로 셀 수 없어서 AI 독자가 필요해요.
+        설정에서 <b>무료 Gemini 키</b>를 넣으면 "여기서 지루해졌다 / 여기서 못 따라갔다"를 짚어줍니다.
+        <br><span class="muted small">키가 없어도 아래 표현 스캔과 A/B 안목 훈련(실전 탭)으로 연습할 수 있어요.</span></div>`;
+    }
+    if (!state.settings.aiSaver) return `<div id="q-fb"><span class="spinner"></span>독자가 당신의 글을 읽고 있어요…</div>`;
+    return `
+      <div class="ai-ask-box">
+        <div class="ai-ask-text">🗣️ <b>독자 리포트</b>를 받아볼까요?
+          <span class="muted" style="font-size:12px">6축 평가 + 지루/혼란 지점 · 호출 1회 · 오늘 ${todayAIUsage()}회 사용</span></div>
+        <button class="btn btn-secondary small" id="q-ask" style="margin:0">리포트 받기</button>
+      </div>
+      <div id="q-fb"></div>`;
   }
   function wireFeedback(sess, L) {
     $("#to-retry").addEventListener("click", () => { sess.stage = "retry"; save(); renderToday(); });
     $("#skip-retry").addEventListener("click", () => { sess.stage = "wrap"; save(); renderToday(); });
+    const askQuality = () => requestQualityReport("q-fb", sess.submission,
+      `${L.category} · ${L.skill} 과제. 과제 지시: ${L.task}`,
+      (rep) => { sess.qualityReport = rep; save(); recordQuality(rep, { day: sess.day, lessonId: L.id, pass: 0 }); });
+    if (sess.qualityReport) { const q = $("#q-fb"); if (q) q.innerHTML = renderQualityReport(sess.qualityReport); }
+    const qAsk = $("#q-ask"); if (qAsk) qAsk.addEventListener("click", askQuality);
+    if (aiReady() && L.track === "quality" && !state.settings.aiSaver && !sess.qualityReport) askQuality();
+
     if (aiReady()) {
       const el = $("#ai-fb");
       if (sess.aiFeedback) { if (el) el.innerHTML = renderAIFeedback(sess.aiFeedback); }
-      else if (state.settings.aiSaver) {
+      else {
         const ask = $("#ai-ask");
         if (ask) ask.addEventListener("click", () => requestAIFeedback(sess, L, sess.submission, "first"));
-      } else requestAIFeedback(sess, L, sess.submission, "first");
+        if (!state.settings.aiSaver && L.track !== "quality") requestAIFeedback(sess, L, sess.submission, "first");
+      }
     }
   }
 
   /* ---- retry ---- */
   function viewRetry(sess, L) {
+    const pass = (sess.revisePass || 0) + 1;
+    const info = revisePassInfo(L, pass);
+    const total = revisePassCount(L);
+    const prev = lastRevisionText(sess);
+    const dim = info.focus ? dimOf(info.focus) : null;
     return `
     <div class="session-step">
-      <span class="step-kicker ${L.track}">DAY ${sess.day} · 재도전</span>
-      <div class="fb-block" style="background:#f6f7fe;border:1px solid var(--line)">
-        <span class="fb-h" style="color:var(--primary)">✏️ 재도전 과제</span>${esc(L.retry)}
+      <span class="step-kicker ${L.track}">DAY ${sess.day} · ${pass}차 수정</span>
+      <div class="pass-dots">${Array.from({length: total}, (_, i) =>
+        `<span class="pass-dot ${i + 1 < pass ? "done" : i + 1 === pass ? "now" : ""}">${i + 1}</span>`).join("")}</div>
+
+      <div class="fb-block fb-next">
+        <span class="fb-h">✏️ ${pass}차 수정의 초점 ${dim ? `· ${dim.emoji} ${esc(dim.label)}` : ""}</span>
+        ${esc(info.instruction)}
+        ${dim ? `<div class="sg why">${esc(dim.short)} — ${esc(dim.detail)}</div>` : ""}
       </div>
-      <div class="section-label">참고 · 처음 쓴 글</div>
-      <div class="ai-answer">${esc(sess.submission)}</div>
-      <label style="margin-top:14px">🔁 고쳐 쓴 부분
-        <textarea id="retry-text" rows="6" placeholder="피드백을 반영해 해당 부분만 다시 써 보세요">${esc(sess.retry)}</textarea>
+
+      ${pass > 1 ? `<details class="hint-fold"><summary>초고 보기</summary>
+        <div class="ai-answer" style="margin:8px 0">${esc(sess.submission)}</div></details>` : `
+        <div class="section-label">참고 · 처음 쓴 글</div>
+        <div class="ai-answer">${esc(sess.submission)}</div>`}
+
+      <label style="margin-top:14px">🔁 ${pass === 1 ? "고쳐 쓰기" : `${pass}차 수정본`}
+        <textarea id="retry-text" rows="8" placeholder="${pass === 1 ? "피드백을 반영해 고쳐 보세요. 전체를 다시 써도 좋습니다." : "이번 초점에 맞춰 한 번 더 다듬어 보세요."}">${esc(prev)}</textarea>
       </label>
-      <button class="btn primary" id="retry-submit">재도전 제출</button>
+      <div class="char-count" id="retry-count">0자</div>
+      <button class="btn primary" id="retry-submit">${pass < total ? `${pass}차 수정 제출` : "수정 완료"}</button>
       ${aiReady() ? `<div id="ai-retry-slot"></div>` : ""}
     </div>`;
   }
+  /* 회차별 초점 — 품질 레슨은 revisePasses 정의를 쓰고, 없으면 1회(L.retry) */
+  function revisePassInfo(L, pass) {
+    const rp = L.revisePasses;
+    if (rp && rp[pass - 1]) return rp[pass - 1];
+    if (pass === 1) return { focus: L.dim || null, instruction: L.retry || "피드백을 반영해 고쳐 쓰세요." };
+    return { focus: null, instruction: "한 번 더 다듬어 보세요." };
+  }
+  function revisePassCount(L) {
+    return (L.revisePasses && L.revisePasses.length) || 1;
+  }
+  function lastRevisionText(sess) {
+    const revs = sess.revisions || [];
+    if (revs.length) return revs[revs.length - 1].text;
+    return sess.retry || sess.submission || "";
+  }
   function wireRetry(sess, L) {
-    $("#retry-text").addEventListener("input", (e) => { sess.retry = e.target.value; });
+    const ta = $("#retry-text"), cc = $("#retry-count");
+    const upd = () => { cc.textContent = charLen(ta.value) + "자"; };
+    ta.addEventListener("input", upd); upd();
     $("#retry-submit").addEventListener("click", () => {
-      sess.retry = $("#retry-text").value.trim();
-      if (charLen(sess.retry) < 5) { alert("고쳐 쓴 내용을 조금 더 적어 주세요."); return; }
-      sess.stage = "wrap"; save(); renderToday();
+      const text = ta.value.trim();
+      if (charLen(text) < 5) { alert("고쳐 쓴 내용을 조금 더 적어 주세요."); return; }
+      const pass = (sess.revisePass || 0) + 1;
+      const info = revisePassInfo(L, pass);
+      sess.revisions = sess.revisions || [];
+      sess.revisions.push({ pass, focus: info.focus || "", text: text });
+      sess.retry = text;              // 기록 호환
+      sess.revisePass = pass;
+      sess.stage = pass < revisePassCount(L) ? "revise-more" : "wrap";
+      save(); renderToday();
     });
   }
 
-  /* ---- wrap: 자기평가 + 인출 요약 ---- */
+  /* ---- 회차 사이: 한 번 더 고칠지 선택 ---- */
+  function viewReviseMore(sess, L) {
+    const pass = sess.revisePass || 1;
+    const next = revisePassInfo(L, pass + 1);
+    const dim = next.focus ? dimOf(next.focus) : null;
+    const cur = lastRevisionText(sess);
+    return `
+    <div class="session-step">
+      <span class="step-kicker ${L.track}">DAY ${sess.day} · ${pass}차 수정 완료</span>
+      <div class="card" style="padding:16px">
+        <h2 style="margin-bottom:8px">✅ ${pass}차 수정을 마쳤어요</h2>
+        <p class="muted small">품질은 초고가 아니라 수정에서 나옵니다. 같은 글을 다른 초점으로 한 번 더 다듬으면 눈에 띄게 좋아져요.</p>
+        ${renderDiffPair("초고", sess.submission, `${pass}차`, cur)}
+        <div class="fb-block fb-next" style="margin-top:14px">
+          <span class="fb-h">➡️ 다음 초점 ${dim ? `· ${dim.emoji} ${esc(dim.label)}` : ""}</span>
+          ${esc(next.instruction)}
+        </div>
+        <button class="btn primary" id="more-revise">한 번 더 고치기</button>
+        <button class="btn ghost small" id="stop-revise">여기서 마무리</button>
+      </div>
+    </div>`;
+  }
+  function wireReviseMore(sess, L) {
+    $("#more-revise").addEventListener("click", () => { sess.stage = "retry"; save(); renderToday(); });
+    $("#stop-revise").addEventListener("click", () => { sess.stage = "wrap"; save(); renderToday(); });
+  }
+  /* 초고 vs 수정본 나란히 보기 */
+  function renderDiffPair(labelA, textA, labelB, textB) {
+    const ma = metrics(textA), mb = metrics(textB);
+    return `
+      <div class="diff-pair">
+        <div class="diff-col">
+          <div class="diff-h before">${esc(labelA)} <span>${ma.chars}자 · ${ma.sentences}문장</span></div>
+          <div class="diff-body">${esc(textA)}</div>
+        </div>
+        <div class="diff-col">
+          <div class="diff-h after">${esc(labelB)} <span>${mb.chars}자 · ${mb.sentences}문장</span></div>
+          <div class="diff-body">${esc(textB)}</div>
+        </div>
+      </div>`;
+  }
+
+  /* ---- wrap: 초고/최종본 비교 + 자기평가 + 인출 요약 ---- */
   function viewWrap(sess, L) {
+    const final = lastRevisionText(sess);
+    const revised = (sess.revisions || []).length > 0 && final !== sess.submission;
+    /* 초고와 최종본 점수를 비교할 수 있으면 성장을 수치로 보여준다 */
+    let growth = "";
+    if (sess.qualityReport && sess.qualityReportFinal) {
+      const a = qualityAvg(sess.qualityReport.scores), b = qualityAvg(sess.qualityReportFinal.scores);
+      const diff = b - a;
+      growth = `<div class="fb-block ${diff >= 0 ? "fb-praise" : "fb-improve"}">
+        <span class="fb-h">📈 초고 → 최종본</span>
+        품질 평균 <b>${a.toFixed(1)}</b> → <b>${b.toFixed(1)}</b>
+        (${diff >= 0 ? "+" : ""}${diff.toFixed(1)})
+      </div>`;
+    }
+    const compareBlock = revised ? `
+      <div class="section-label">🔍 초고와 최종본 비교 <span class="muted">(수정이 만든 차이)</span></div>
+      ${renderDiffPair("초고", sess.submission, "최종본", final)}
+      ${growth}
+      ${aiReady() && !sess.qualityReportFinal ? `
+        <div class="ai-ask-box">
+          <div class="ai-ask-text">🗣️ <b>최종본</b>도 독자 리포트를 받아 초고와 비교할까요?
+            <span class="muted" style="font-size:12px">호출 1회</span></div>
+          <button class="btn btn-secondary small" id="final-q-ask" style="margin:0">최종본 평가</button>
+        </div>
+        <div id="q-final"></div>` : `<div id="q-final"></div>`}
+    ` : "";
     return `
     <div class="session-step">
       <span class="step-kicker ${L.track}">DAY ${sess.day} · 마무리</span>
+
+      ${compareBlock}
 
       <div class="section-label">오늘 이 기술, 얼마나 익혔나요? <span class="muted">(다음 과제 난이도 조절에 쓰여요)</span></div>
       <div class="timer-controls" style="justify-content:stretch; gap:8px; margin-top:8px">
@@ -897,6 +1316,17 @@ ${sl}
     </div>`;
   }
   function wireWrap(sess, L) {
+    const fq = $("#final-q-ask");
+    if (fq) fq.addEventListener("click", () => {
+      requestQualityReport("q-final", lastRevisionText(sess),
+        `${L.category} · ${L.skill} 과제의 수정 최종본`,
+        (rep) => {
+          sess.qualityReportFinal = rep; save();
+          recordQuality(rep, { day: sess.day, lessonId: L.id, pass: sess.revisePass || 1 });
+          renderToday();
+        });
+    });
+    if (sess.qualityReportFinal) { const q = $("#q-final"); if (q) q.innerHTML = renderQualityReport(sess.qualityReportFinal); }
     $$(".rate").forEach(b => b.addEventListener("click", () => {
       sess.selfRating = parseInt(b.getAttribute("data-r"), 10);
       $$(".rate").forEach(x => x.style.background = "");
@@ -925,7 +1355,11 @@ ${sl}
     const record = {
       day: sess.day, lessonId: sess.lessonId, track: sess.track,
       category: sess.category, skill: sess.skill, topic: sess.topic || "",
+      dim: sess.dim || "",
       submission: sess.submission, noticed: sess.noticed, retry: sess.retry,
+      revisions: sess.revisions || [],
+      qualityScores: sess.qualityReport ? sess.qualityReport.scores : null,
+      qualityScoresFinal: sess.qualityReportFinal ? sess.qualityReportFinal.scores : null,
       summary: sess.summary, selfRating: sess.selfRating, date: todayStr()
     };
     state.sessions.push(record);
@@ -989,17 +1423,83 @@ ${sl}
     g.textContent = state.goals || "아직 목표를 설정하지 않았어요.";
     g.className = state.goals ? "" : "muted";
 
-    // 기술 그리드
+    // 기술 그리드 — 트랙별로 묶어서 표시
     const grid = $("#skill-grid");
-    const all = CURRICULUM;
-    grid.innerHTML = all.map(l => {
+    const chip = (l) => {
       const sk = state.skills[l.id];
       const cls = !sk ? "d-none" : sk.rating === 1 ? "d-weak" : sk.rating === 2 ? "d-mid" : sk.rating >= 3 ? "d-strong" : "d-none";
       return `<div class="skill-chip"><span class="sname">${esc(l.skill.split(" — ")[0])}</span><span class="dot ${cls}"></span></div>`;
+    };
+    grid.innerHTML = ["write", "quality", "speak"].map(t => {
+      const pool = POOLS[t] || [];
+      if (!pool.length) return "";
+      return `<div class="skill-group"><div class="skill-group-h">${TRACK_ICONS[t] || t}</div>
+        <div class="skill-group-grid">${pool.map(chip).join("")}</div></div>`;
     }).join("");
 
+    renderQualityPanel();
+    renderDrillStat();
     renderHeatmap();
     renderWeeklyReview();
+  }
+
+  /* 품질 6축 추이 — 첫 리포트 대비 최신 리포트, 축별 평균과 스파크라인 */
+  function renderQualityPanel() {
+    const card = $("#quality-card"), el = $("#quality-panel");
+    if (!card || !el) return;
+    const hist = state.quality || [];
+    if (!hist.length) { card.style.display = "none"; return; }
+    card.style.display = "block";
+    const first = hist[0], last = hist[hist.length - 1];
+    const rows = QUALITY_DIMS.map(d => {
+      const vals = hist.map(h => h.scores && h.scores[d.key]).filter(v => typeof v === "number");
+      if (!vals.length) return "";
+      const cur = vals[vals.length - 1], f = vals[0];
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const diff = vals.length > 1 ? cur - f : 0;
+      const pct = Math.max(0, Math.min(100, cur / 5 * 100));
+      const cls = cur <= 2 ? "low" : cur === 3 ? "mid" : "high";
+      const spark = vals.slice(-8).map(v => `<span class="spark-bar" style="height:${Math.max(12, v / 5 * 100)}%" title="${v}"></span>`).join("");
+      return `<div class="qtrend-row">
+        <span class="qbar-label">${d.emoji} ${esc(d.label)}</span>
+        <span class="qbar-track"><span class="qbar-fill ${cls}" style="width:${pct}%"></span></span>
+        <span class="qbar-val ${cls}">${cur}</span>
+        <span class="spark">${spark}</span>
+        <span class="qtrend-diff ${diff > 0 ? "up" : diff < 0 ? "down" : ""}">${diff > 0 ? "▲" + diff : diff < 0 ? "▼" + Math.abs(diff) : "–"}</span>
+        <span class="qtrend-avg">평균 ${avg.toFixed(1)}</span>
+      </div>`;
+    }).join("");
+    const a = qualityAvg(first.scores || {}), b = qualityAvg(last.scores || {});
+    const weak = weakestQualityDim();
+    const wd = weak ? dimOf(weak) : null;
+    el.innerHTML = `
+      <p class="muted small">리포트 <b>${hist.length}</b>회 누적 · 전체 평균 ${a.toFixed(1)} → <b>${b.toFixed(1)}</b>
+      ${hist.length > 1 ? `(${b - a >= 0 ? "+" : ""}${(b - a).toFixed(1)})` : ""}</p>
+      <div class="qtrend">${rows}</div>
+      ${wd ? `<div class="fb-block fb-improve" style="margin-top:12px">
+        <span class="fb-h">🎯 지금 가장 약한 축 · ${wd.emoji} ${esc(wd.label)}</span>
+        ${esc(wd.detail)}<div class="sg why">품질 트랙 과제가 이 축을 우선 겨냥합니다.</div></div>` : ""}
+      ${last.oneLine ? `<div class="recall-line" style="margin-top:10px">🗣️ 최근 독자의 한마디: <b>${esc(last.oneLine)}</b></div>` : ""}`;
+  }
+
+  function renderDrillStat() {
+    const card = $("#drill-stat-card"), el = $("#drill-stat");
+    if (!card || !el) return;
+    const d = state.drills || { total: 0 };
+    if (!d.total) { card.style.display = "none"; return; }
+    card.style.display = "block";
+    const acc = Math.round(d.correct / d.total * 100);
+    const covered = (d.done || []).length;
+    el.innerHTML = `
+      <div class="stat-row" style="margin:0">
+        <div class="card stat-card" style="margin:0"><div class="stat-value">${d.total}</div><div class="stat-label">푼 문제</div></div>
+        <div class="card stat-card" style="margin:0"><div class="stat-value">${acc}%</div><div class="stat-label">정답률</div></div>
+        <div class="card stat-card" style="margin:0"><div class="stat-value">${covered}/${AB_DRILLS.length}</div><div class="stat-label">경험한 유형</div></div>
+      </div>
+      <p class="muted small" style="margin-top:10px">${acc >= 80
+        ? "안목이 잘 잡혔어요. 이제 내 글에 적용하는 게 관건입니다."
+        : acc >= 60 ? "절반 이상 맞히고 있어요. 해설의 '원리'를 소리 내어 읽어보세요."
+        : "지금은 감으로 고르는 단계예요. 틀린 문제의 원리를 다시 읽으면 빠르게 올라갑니다."}</p>`;
   }
 
   function renderHeatmap() {
@@ -1040,13 +1540,18 @@ ${sl}
     const list = [...state.sessions].reverse();
     if (!list.length) { el.innerHTML = `<p class="empty-msg">아직 데일리 세션 기록이 없어요. 오늘 탭에서 첫 세션을 시작해 보세요!</p>`; return; }
     el.innerHTML = list.map((s, idx) => {
-      const tb = s.track === "speak" ? "tb-speak" : s.track === "review" ? "tb-review" : "tb-write";
-      const tn = s.track === "speak" ? "말하기" : s.track === "review" ? "복습" : s.lessonId === "diagnostic" ? "진단" : "글쓰기";
+      const tbMap = { speak: "tb-speak", review: "tb-review", quality: "tb-quality", write: "tb-write" };
+      const tb = tbMap[s.track] || "tb-write";
+      const tn = s.lessonId === "diagnostic" ? "진단" : (TRACK_NAMES[s.track] || "구조");
+      const revs = (s.revisions || []).map(r => `\n【${r.pass}차 수정${r.focus && dimOf(r.focus) ? ` · ${dimOf(r.focus).label}` : ""}】\n${r.text}`).join("");
+      const qs = s.qualityScores ? `\n📊 품질: ${QUALITY_DIMS.map(d => `${d.label} ${s.qualityScores[d.key] || "-"}`).join(" / ")}` : "";
+      const qsf = s.qualityScoresFinal ? `\n📈 최종본: ${QUALITY_DIMS.map(d => `${d.label} ${s.qualityScoresFinal[d.key] || "-"}`).join(" / ")}` : "";
       const body = [
         s.topic ? `🎤 주제: ${s.topic}` : "",
-        s.submission ? `【작성】\n${s.submission}` : "",
+        s.submission ? `【초고】\n${s.submission}` : "",
         s.noticed ? `\n【스스로 발견】\n${s.noticed}` : "",
-        s.retry ? `\n【재도전】\n${s.retry}` : "",
+        revs || (s.retry ? `\n【수정】\n${s.retry}` : ""),
+        qs, qsf,
         s.summary ? `\n📌 한 줄 요약: ${s.summary}` : ""
       ].filter(Boolean).join("\n");
       return `
@@ -1377,6 +1882,15 @@ ${text}
   let practiceCat = "all";
   const sitById = (id) => SITUATIONS.find(s => s.id === id);
 
+  let practiceMode = "situations";   // 'situations' | 'drills'
+  function segmentHTML() {
+    const d = state.drills || { total: 0 };
+    return `
+      <div class="seg-row">
+        <button class="seg ${practiceMode === "situations" ? "active" : ""}" data-mode="situations">🎤 상황별 말하기</button>
+        <button class="seg ${practiceMode === "drills" ? "active" : ""}" data-mode="drills">👁️ 안목 훈련${d.total ? `<span class="seg-n">${d.total}</span>` : ""}</button>
+      </div>`;
+  }
   function renderPractice() {
     const root = $("#practice-root");
     if (!root) return;
@@ -1385,10 +1899,113 @@ ${text}
       const sit = sitById(ap.sid);
       root.innerHTML = ap.stage === "feedback" ? viewPracticeFeedback(ap, sit) : viewPracticeWrite(ap, sit);
       ap.stage === "feedback" ? wirePracticeFeedback(ap, sit) : wirePracticeWrite(ap, sit);
-    } else {
-      root.innerHTML = viewPracticeBrowse();
-      wirePracticeBrowse();
+      return;
     }
+    if (practiceMode === "drills") {
+      root.innerHTML = segmentHTML() + viewDrill();
+      wireSegments(); wireDrill();
+    } else {
+      root.innerHTML = segmentHTML() + viewPracticeBrowse();
+      wireSegments(); wirePracticeBrowse();
+    }
+  }
+  function wireSegments() {
+    $$(".seg").forEach(s => s.addEventListener("click", () => {
+      practiceMode = s.getAttribute("data-mode"); renderPractice(); window.scrollTo(0, 0);
+    }));
+  }
+
+  /* ==================== A/B 안목 훈련 (API 0원) ====================
+   * 절대 채점보다 비교 판단이 정확하다는 평가 연구에 기반.
+   * 먼저 고르게 하고(주목), 그다음 원리를 보여준다.
+   * ============================================================== */
+  let drillState = null;   // { drill, picked, revealed }
+  let drillFilter = "all";
+
+  function drillPool() {
+    return AB_DRILLS.filter(d => drillFilter === "all" || d.dim === drillFilter);
+  }
+  function nextDrill() {
+    const pool = drillPool();
+    const done = (state.drills.done || []);
+    const fresh = pool.filter(d => done.indexOf(d.id) < 0);
+    const src = fresh.length ? fresh : pool;     // 다 풀면 다시 섞어서 반복
+    return src[Math.floor(Math.random() * src.length)] || null;
+  }
+  function viewDrill() {
+    const d = state.drills || { done: [], correct: 0, total: 0 };
+    const chips = [{ key: "all", label: "전체", emoji: "✨" }].concat(QUALITY_DIMS.map(x => ({ key: x.key, label: x.label, emoji: x.emoji })))
+      .map(c => {
+        const n = c.key === "all" ? AB_DRILLS.length : AB_DRILLS.filter(x => x.dim === c.key).length;
+        return `<button class="cat-chip ${drillFilter === c.key ? "active" : ""}" data-dim="${c.key}">${c.emoji} ${esc(c.label)}<span class="n">${n}</span></button>`;
+      }).join("");
+    if (!drillState) drillState = { drill: nextDrill(), picked: null, revealed: false };
+    const dr = drillState.drill;
+    if (!dr) return `<div class="card"><p class="empty-msg">이 분야의 문제가 없어요.</p></div>`;
+    const dim = dimOf(dr.dim);
+    const acc = d.total ? Math.round(d.correct / d.total * 100) : 0;
+    const picked = drillState.picked, revealed = drillState.revealed;
+    const optCls = (k) => {
+      if (!revealed) return picked === k ? "picked" : "";
+      if (k === dr.better) return "correct";
+      return picked === k ? "wrong" : "dim";
+    };
+    return `
+      <div class="card" style="padding:14px 16px">
+        <h2 style="margin-bottom:6px">👁️ 안목 훈련 <span class="sub">A/B 비교</span></h2>
+        <p class="practice-intro">둘 중 <b>어느 쪽이 더 좋은지 먼저 고르고</b>, 그다음 이유를 확인하세요.
+        규칙을 외우기보다 차이를 알아차리는 것이 실력이 됩니다. ${d.total ? `<b>${d.total}문제</b> 중 정답률 <b>${acc}%</b>` : ""}
+        <span class="muted" style="font-size:12px">· AI 호출 없음</span></p>
+        <div class="cat-scroll">${chips}</div>
+      </div>
+
+      <div class="card">
+        <div class="drill-dim">${dim ? `${dim.emoji} ${esc(dim.label)}` : ""} · ${esc(dim ? dim.short : "")}</div>
+        <div class="drill-q">${esc(dr.q)}</div>
+        <button class="drill-opt ${optCls("a")}" data-pick="a" ${revealed ? "disabled" : ""}>
+          <span class="drill-tag">A</span><span class="drill-text">${esc(dr.a)}</span>
+        </button>
+        <button class="drill-opt ${optCls("b")}" data-pick="b" ${revealed ? "disabled" : ""}>
+          <span class="drill-tag">B</span><span class="drill-text">${esc(dr.b)}</span>
+        </button>
+        ${revealed ? `
+          <div class="drill-result ${picked === dr.better ? "ok" : "no"}">
+            ${picked === dr.better ? "✅ 맞았어요" : `❌ 아쉬워요 — 정답은 ${dr.better.toUpperCase()}`}
+          </div>
+          <div class="fb-block fb-now"><span class="fb-h">왜 그런가</span>${esc(dr.why)}</div>
+          <div class="fb-block fb-next"><span class="fb-h">기억할 원리</span>${esc(dr.principle)}</div>
+          <button class="btn primary" id="drill-next">다음 문제</button>
+        ` : `<p class="muted small" style="margin-top:12px">고르면 해설이 나옵니다.</p>`}
+      </div>`;
+  }
+  function wireDrill() {
+    $$(".cat-chip").forEach(c => c.addEventListener("click", () => {
+      drillFilter = c.getAttribute("data-dim");
+      drillState = null; renderPractice();
+    }));
+    $$(".drill-opt").forEach(b => b.addEventListener("click", () => {
+      if (drillState.revealed) return;
+      const pick = b.getAttribute("data-pick");
+      drillState.picked = pick;
+      drillState.revealed = true;
+      const dr = drillState.drill;
+      state.drills.total = (state.drills.total || 0) + 1;
+      if (pick === dr.better) state.drills.correct = (state.drills.correct || 0) + 1;
+      state.drills.done = state.drills.done || [];
+      if (state.drills.done.indexOf(dr.id) < 0) state.drills.done.push(dr.id);
+      // 활동 기록은 하루 한 번만 (문제마다 세면 잔디밭·스트릭이 부풀어 오른다)
+      if (state.drills.lastDate !== todayStr()) {
+        state.drills.lastDate = todayStr();
+        recordActivity();
+      }
+      save();
+      renderPractice();
+    }));
+    const nx = $("#drill-next");
+    if (nx) nx.addEventListener("click", () => {
+      drillState = { drill: nextDrill(), picked: null, revealed: false };
+      renderPractice(); window.scrollTo(0, 0);
+    });
   }
 
   function viewPracticeBrowse() {
