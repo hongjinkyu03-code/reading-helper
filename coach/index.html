@@ -148,6 +148,13 @@
           절약 모드를 켜면 피드백이 자동으로 호출되지 않고, 필요할 때만 <b>“피드백 받기”</b>를 눌러 사용합니다.
           한 번 받은 피드백은 저장되어 다시 호출하지 않아요.
         </p>
+        <label class="row-check">
+          <input type="checkbox" id="set-autogen"> 안목 훈련 문제를 매일 자동 생성
+        </label>
+        <p class="muted" style="font-size:12px; margin-top:4px">
+          안목 훈련 탭을 처음 여는 날 <b>하루 1회</b>만 호출해, 내 약점 축에 맞춘 새 A/B 문제를 만들어
+          기기에 영구 저장합니다. 검증을 통과한 문제만 추가되고, 마음에 안 드는 문제는 삭제할 수 있어요.
+        </p>
         <p class="usage-row">오늘 AI 호출: <b id="ai-usage-count">0</b>회</p>
         <button class="btn primary" id="save-settings">저장</button>
         <button class="btn ghost small" id="test-ai">연결 테스트</button>
@@ -212,6 +219,7 @@
   <script src="curriculum.js"></script>
   <script src="situations.js"></script>
   <script src="quality.js"></script>
+  <script src="drills.js"></script>
   <script src="coach.js"></script>
 </body>
 </html>

@@ -382,6 +382,22 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
 .seg-n{display:inline-block; background:var(--primary); color:#fff; font-size:10px; font-weight:800;
   border-radius:999px; padding:1px 6px; margin-left:5px; vertical-align:1px}
 
+/* ---------- 오늘의 세트 / AI 생성 ---------- */
+.daily-bar{background:#f6f7fe; border:1px solid var(--line); border-radius:12px; padding:10px 12px;
+  margin:10px 0}
+.daily-head{display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+  font-size:13px; flex-wrap:wrap; margin-bottom:7px}
+.daily-head .muted{font-size:11.5px}
+.daily-track{height:7px; background:#e4e6f2; border-radius:999px; overflow:hidden}
+.daily-fill{display:block; height:100%; background:var(--primary); border-radius:999px;
+  transition:width .4s ease}
+.daily-done{font-size:12.5px; color:var(--good); font-weight:700; margin-top:7px}
+.gen-row{display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;
+  background:#f7ebfd; border:1px dashed #ddc3ef; border-radius:11px; padding:9px 12px; margin-bottom:8px}
+.gen-text{font-size:13px}
+.gen-badge{font-size:9.5px; font-weight:800; background:#f7ebfd; color:#8b2fb8; border-radius:999px;
+  padding:2px 7px; margin-left:5px; vertical-align:1px}
+
 /* ---------- A/B 드릴 ---------- */
 .drill-dim{font-size:11.5px; font-weight:800; color:var(--primary); background:var(--primary-soft);
   display:inline-block; padding:4px 11px; border-radius:999px; margin-bottom:10px}
