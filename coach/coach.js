@@ -470,7 +470,7 @@ ${text}
     const slot = $("#" + slotId);
     if (slot) slot.innerHTML = `<span class="spinner"></span>독자가 당신의 글을 읽고 있어요…`;
     try {
-      const raw = await callAI(QUALITY_SYSTEM, qualityUserMessage(text, ctx), 2048, true);
+      const raw = await callAI(QUALITY_SYSTEM, qualityUserMessage(text, ctx), 3200, true);
       const j = extractJSON(raw);
       if (!j.scores) throw new Error("점수가 없습니다");
       if (onDone) onDone(j);
@@ -773,12 +773,40 @@ ${ql}
     }
     return out;
   }
+  /* 출력이 토큰 상한에 걸려 중간에 끊기면 닫는 괄호가 아예 없다 — 그런 JSON은
+     따옴표·콤마를 고쳐도 못 살린다. 마지막으로 완결된 콤마 지점까지만 잘라내고
+     (미완성 마지막 항목은 버림), 그 시점의 괄호 스택을 거꾸로 닫아 유효한 JSON을 만든다.
+     최근 값 몇 개를 잃을 수 있지만, scores·oneLine 등 앞쪽 핵심 필드는 대개 살아남는다. */
+  function repairTruncatedJSON(s) {
+    let stack = [], inStr = false, esc = false;
+    const cuts = [];  // { pos: 콤마 직전까지 자를 위치, stack: 그 시점의 괄호 스택 }
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { if (inStr) esc = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === "{" || c === "[") stack.push(c);
+      else if (c === "}") { if (stack[stack.length - 1] === "{") stack.pop(); }
+      else if (c === "]") { if (stack[stack.length - 1] === "[") stack.pop(); }
+      else if (c === "," && stack.length) cuts.push({ pos: i, stack: stack.slice() });
+    }
+    for (let k = cuts.length - 1; k >= 0; k--) {
+      const { pos, stack: snap } = cuts[k];
+      let attempt = s.slice(0, pos);
+      for (let j = snap.length - 1; j >= 0; j--) attempt += (snap[j] === "{" ? "}" : "]");
+      try { return JSON.parse(attempt); } catch (e) { /* 다음 후보 시도 */ }
+    }
+    return null;
+  }
   function extractJSON(s) {
     let t = String(s).trim();
     t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
-    const a = t.indexOf("{"), b = t.lastIndexOf("}");
-    if (a < 0 || b <= a) throw new Error("JSON 형식이 아닙니다");
-    t = t.slice(a, b + 1);
+    const a = t.indexOf("{");
+    if (a < 0) throw new Error("JSON 형식이 아닙니다");
+    const body = t.slice(a);                                  // 잘림 복구용 — 끝까지 전부
+    const b = t.lastIndexOf("}");
+    const bounded = b > a ? t.slice(a, b + 1) : body;          // 정상 응답용 — 마지막 '}'까지
     const noTrailing = (x) => x.replace(/,(\s*[}\]])/g, "$1");
     const smartToPlain = (x) => x.replace(/[‘’]/g, "'").replace(/[“”]/g, "'");
     const steps = [
@@ -791,9 +819,14 @@ ${ql}
     ];
     let lastErr = null;
     for (const f of steps) {
-      try { return JSON.parse(f(t)); } catch (e) { lastErr = e; }
+      try { return JSON.parse(f(bounded)); } catch (e) { lastErr = e; }
     }
-    throw new Error("응답 형식이 깨졌어요 (" + (lastErr ? lastErr.message.slice(0, 60) : "parse") + ")");
+    // 여기까지 실패했다면 응답이 중간에 잘렸을 가능성이 크다 — 마지막 완결 지점까지 복구 시도
+    for (const f of steps) {
+      const repaired = repairTruncatedJSON(f(body));
+      if (repaired) return repaired;
+    }
+    throw new Error("응답이 도중에 잘렸어요. 다시 시도하면 보통 해결돼요 (" + (lastErr ? lastErr.message.slice(0, 50) : "parse") + ")");
   }
 
   /* 진단 결과를 실제 트랙 패턴의 날짜에 배치한다(패턴이 바뀌어도 따라간다) */
@@ -829,7 +862,7 @@ ${ql}
     const local = localDiagnose(text);
     try {
       if (!aiReady()) throw new Error("__offline__");
-      const raw = await callAI(DIAG_SYSTEM, diagUserMessage(text, state.goals), 2048, true);
+      const raw = await callAI(DIAG_SYSTEM, diagUserMessage(text, state.goals), 3200, true);
       const j = extractJSON(raw);
       const weaknesses = (j.weaknesses || []).filter(w => w && byId(w.skillId));
       state.diagnosis = {
@@ -950,7 +983,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     if (st) { st.textContent = "목표에 맞춰 커리큘럼을 다시 설계하고 있어요…"; st.className = "notify-status"; }
     const fromDay = state.currentDay + 1;
     try {
-      const raw = await callAI(PLAN_SYSTEM, planUserMessage(fromDay), 2048, true);
+      const raw = await callAI(PLAN_SYSTEM, planUserMessage(fromDay), 2800, true);
       const j = extractJSON(raw);
       const plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus, fromDay);
       if (!Object.keys(plan).length) throw new Error("유효한 기술 id가 없습니다");
@@ -2057,10 +2090,14 @@ ${text}
       : callGemini(system, userMsg, maxTokens, wantJSON);
   }
 
-  async function callGemini(system, userMsg, maxTokens, wantJSON) {
+  /* 출력이 토큰 상한에 걸려 중간에 잘리면(finishReason MAX_TOKENS) JSON이 깨진다.
+     복구를 시도하기 전에, 예산을 늘려 한 번 자동 재시도한다 — 근본 원인을 없애는 편이
+     사후 복구보다 안전하다. */
+  async function callGemini(system, userMsg, maxTokens, wantJSON, _retried) {
     const model = currentModel() || "gemini-2.5-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(currentKey())}`;
-    const genCfg = { maxOutputTokens: maxTokens || 1600, temperature: 0.7 };
+    const budget = maxTokens || 1600;
+    const genCfg = { maxOutputTokens: budget, temperature: 0.7 };
     if (wantJSON) { genCfg.responseMimeType = "application/json"; genCfg.temperature = 0.4; }
     const res = await fetch(url, {
       method: "POST",
@@ -2076,8 +2113,12 @@ ${text}
       throw new Error(`${res.status} ${detail || "요청 실패"}`);
     }
     const data = await res.json();
-    const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+    const cand = data.candidates && data.candidates[0];
+    const parts = (cand && cand.content && cand.content.parts) || [];
     const text = parts.map(p => p.text || "").join("").trim();
+    if (cand && cand.finishReason === "MAX_TOKENS" && !_retried && budget < 7500) {
+      return callGemini(system, userMsg, Math.min(budget * 2, 8000), wantJSON, true);
+    }
     if (!text) throw new Error(data.promptFeedback ? "안전 필터로 응답이 차단됐어요" : "빈 응답");
     return text;
   }
@@ -2261,7 +2302,11 @@ ${text}
     const picked = order(review, "r").slice(0, 4)
       .concat(order(fresh, "f"))
       .concat(order(rest, "x"));
-    return picked.slice(0, DAILY_SET_SIZE);
+    // 세 집합은 서로 겹치지 않아야 하지만, 데이터에 우연히 같은 id가 둘 있는 경우까지
+    // 대비해 한 번 더 걸러낸다(방어적 중복 제거).
+    const seen = new Set(), dedup = [];
+    for (const d of picked) { if (!seen.has(d.id)) { seen.add(d.id); dedup.push(d); } }
+    return dedup.slice(0, DAILY_SET_SIZE);
   }
   function todaySet() {
     const t = todayStr();
@@ -2277,13 +2322,24 @@ ${text}
     save();
     return { items: set, solved: [] };
   }
+  /* 오늘의 세트를 다 풀면 자유 연습(무작위)으로 넘어가는데, 순수 무작위 추첨은
+     방금 본 문제가 바로 다음에 또 뽑힐 수 있다(카테고리 필터로 문제 수가 적을수록
+     체감 확률이 높아짐). 직전 문제는 후보에서 제외해 연속 중복을 막는다. */
+  let _lastDrillId = null;
   function nextDrill() {
     const set = todaySet();
     const unsolved = set.items.filter(d => set.solved.indexOf(d.id) < 0);
-    if (unsolved.length) return unsolved[0];
-    // 오늘의 세트를 다 풀었으면 자유 연습(무작위)
-    const pool = drillPool();
-    return pool[Math.floor(Math.random() * pool.length)] || null;
+    let picked;
+    if (unsolved.length) {
+      picked = unsolved[0];
+    } else {
+      const pool = drillPool();
+      const candidates = pool.filter(d => d.id !== _lastDrillId);
+      const src = candidates.length ? candidates : pool;
+      picked = src[Math.floor(Math.random() * src.length)] || null;
+    }
+    if (picked) _lastDrillId = picked.id;
+    return picked;
   }
   function viewDrill() {
     const d = state.drills || { done: [], correct: 0, total: 0 };
@@ -2507,7 +2563,7 @@ ${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 축의 새 문제
     }
     let added = 0;
     try {
-      const raw = await callAI(DRILL_GEN_SYSTEM, drillGenUserMessage(dim, 8), 3072, true);
+      const raw = await callAI(DRILL_GEN_SYSTEM, drillGenUserMessage(dim, 8), 3584, true);
       const j = extractJSON(raw);
       const list = Array.isArray(j.drills) ? j.drills : [];
       state.drills.generated = state.drills.generated || [];
