@@ -362,7 +362,12 @@
 readerReport는 3~5개. type의 뜻 —
 good(여기서 좋았다) / bored(지루해졌다) / confused(못 따라갔다) /
 curious(궁금해졌다) / generic(누구나 쓸 수 있는 말이다) / gap(전제가 빠져 막혔다).
-반드시 최소 1개는 good을 포함하고, 인용은 학습자 글의 실제 표현이어야 합니다.`;
+반드시 최소 1개는 good을 포함하고, 인용은 학습자 글의 실제 표현이어야 합니다.
+
+## JSON 형식 주의 (반드시)
+- 값 안에 큰따옴표(")를 쓰지 마세요. 인용이 필요하면 홑따옴표(')나 그냥 따옴표 없이 쓰세요.
+- 값 안에서 줄바꿈하지 마세요.
+- 마지막 항목 뒤에 콤마를 붙이지 마세요.`;
 
   function qualityUserMessage(text, ctx) {
     const m = metrics(text), scan = localQualityScan(text);
@@ -465,7 +470,7 @@ ${text}
     const slot = $("#" + slotId);
     if (slot) slot.innerHTML = `<span class="spinner"></span>독자가 당신의 글을 읽고 있어요…`;
     try {
-      const raw = await callAI(QUALITY_SYSTEM, qualityUserMessage(text, ctx), 2048);
+      const raw = await callAI(QUALITY_SYSTEM, qualityUserMessage(text, ctx), 2048, true);
       const j = extractJSON(raw);
       if (!j.scores) throw new Error("점수가 없습니다");
       if (onDone) onDone(j);
@@ -709,7 +714,12 @@ recommendCats는 다음 중에서만 고르세요: drink(술자리·회식), mt(
 meeting(회의·미팅), interview(면접), work(직장 대화), events(경조사·행사), daily(일상 대화), relation(관계·감정).
 strengths는 1~2개, weaknesses는 2~3개. quote는 반드시 학습자 글의 실제 표현이어야 합니다(없으면 빈 문자열).
 skillId·writeFocus·speakFocus·qualityFocus는 반드시 주어진 id 목록에서만 고르세요.
-weaknesses의 skillId는 구조·품질 목록 어디서든 고를 수 있습니다.`;
+weaknesses의 skillId는 구조·품질 목록 어디서든 고를 수 있습니다.
+
+## JSON 형식 주의 (반드시)
+- 값 안에 큰따옴표(")를 쓰지 마세요. 인용이 필요하면 홑따옴표(')나 그냥 따옴표 없이 쓰세요.
+- 값 안에서 줄바꿈하지 마세요.
+- 마지막 항목 뒤에 콤마를 붙이지 마세요.`;
 
   function diagUserMessage(text, goal) {
     const wl = WRITE_POOL.map(l => `${l.id}: ${l.skill}`).join("\n");
@@ -739,13 +749,51 @@ ${ql}
 위 학습자를 진단하고 맞춤 커리큘럼을 JSON으로 설계하세요.`;
   }
 
-  /* 모델이 코드블록이나 잡텍스트를 섞어도 JSON을 건져낸다 */
+  /* ---- JSON 파싱 견고화 ----
+   * 모델은 인용문 안에 큰따옴표를 넣거나, 트레일링 콤마·스마트쿼트·생짜 개행을
+   * 섞어 JSON을 깨뜨린다. 실패하면 단계적으로 복구해 다시 시도한다. */
+  function escapeInnerQuotes(s) {
+    let out = "", inStr = false, esc = false;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (esc) { out += c; esc = false; continue; }
+      if (c === "\\") { out += c; esc = true; continue; }
+      if (c === '"') {
+        if (!inStr) { inStr = true; out += c; continue; }
+        // 문자열 안에서 만난 " — 뒤에 구조 문자가 오면 종료, 아니면 값 속의 인용부호
+        let j = i + 1;
+        while (j < s.length && /\s/.test(s[j])) j++;
+        const nx = s[j];
+        if (nx === "," || nx === "}" || nx === "]" || nx === ":") { inStr = false; out += c; }
+        else out += '\\"';
+        continue;
+      }
+      if (inStr && (c === "\n" || c === "\r")) { out += "\\n"; continue; }  // 생짜 개행
+      out += c;
+    }
+    return out;
+  }
   function extractJSON(s) {
     let t = String(s).trim();
     t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
     const a = t.indexOf("{"), b = t.lastIndexOf("}");
     if (a < 0 || b <= a) throw new Error("JSON 형식이 아닙니다");
-    return JSON.parse(t.slice(a, b + 1));
+    t = t.slice(a, b + 1);
+    const noTrailing = (x) => x.replace(/,(\s*[}\]])/g, "$1");
+    const smartToPlain = (x) => x.replace(/[‘’]/g, "'").replace(/[“”]/g, "'");
+    const steps = [
+      (x) => x,
+      noTrailing,
+      (x) => smartToPlain(noTrailing(x)),
+      (x) => escapeInnerQuotes(x),
+      (x) => escapeInnerQuotes(noTrailing(x)),
+      (x) => escapeInnerQuotes(smartToPlain(noTrailing(x)))
+    ];
+    let lastErr = null;
+    for (const f of steps) {
+      try { return JSON.parse(f(t)); } catch (e) { lastErr = e; }
+    }
+    throw new Error("응답 형식이 깨졌어요 (" + (lastErr ? lastErr.message.slice(0, 60) : "parse") + ")");
   }
 
   /* 진단 결과를 실제 트랙 패턴의 날짜에 배치한다(패턴이 바뀌어도 따라간다) */
@@ -781,7 +829,7 @@ ${ql}
     const local = localDiagnose(text);
     try {
       if (!aiReady()) throw new Error("__offline__");
-      const raw = await callAI(DIAG_SYSTEM, diagUserMessage(text, state.goals), 2048);
+      const raw = await callAI(DIAG_SYSTEM, diagUserMessage(text, state.goals), 2048, true);
       const j = extractJSON(raw);
       const weaknesses = (j.weaknesses || []).filter(w => w && byId(w.skillId));
       state.diagnosis = {
@@ -850,7 +898,12 @@ ${ql}
   "recommendCats": ["실전 카테고리 key 1~3개"],
   "advice": "다음 2주 학습 방향 3~4문장"
 }
-id는 반드시 주어진 목록에서만 고르세요.`;
+id는 반드시 주어진 목록에서만 고르세요.
+
+## JSON 형식 주의 (반드시)
+- 값 안에 큰따옴표(")를 쓰지 마세요. 인용이 필요하면 홑따옴표(')나 그냥 따옴표 없이 쓰세요.
+- 값 안에서 줄바꿈하지 마세요.
+- 마지막 항목 뒤에 콤마를 붙이지 마세요.`;
 
   function planUserMessage(fromDay) {
     const listOf = (pool) => pool.map(l => {
@@ -897,7 +950,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     if (st) { st.textContent = "목표에 맞춰 커리큘럼을 다시 설계하고 있어요…"; st.className = "notify-status"; }
     const fromDay = state.currentDay + 1;
     try {
-      const raw = await callAI(PLAN_SYSTEM, planUserMessage(fromDay), 2048);
+      const raw = await callAI(PLAN_SYSTEM, planUserMessage(fromDay), 2048, true);
       const j = extractJSON(raw);
       const plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus, fromDay);
       if (!Object.keys(plan).length) throw new Error("유효한 기술 id가 없습니다");
@@ -1996,23 +2049,26 @@ ${text}
     return state.aiUsage.date === todayStr() ? state.aiUsage.count : 0;
   }
 
-  function callAI(system, userMsg, maxTokens) {
+  /* wantJSON=true 면 Gemini를 JSON 전용 출력 모드로 돌려 형식 붕괴를 크게 줄인다 */
+  function callAI(system, userMsg, maxTokens, wantJSON) {
     countAIUsage();
     return state.settings.provider === "anthropic"
       ? callAnthropic(system, userMsg, maxTokens)
-      : callGemini(system, userMsg, maxTokens);
+      : callGemini(system, userMsg, maxTokens, wantJSON);
   }
 
-  async function callGemini(system, userMsg, maxTokens) {
+  async function callGemini(system, userMsg, maxTokens, wantJSON) {
     const model = currentModel() || "gemini-2.5-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(currentKey())}`;
+    const genCfg = { maxOutputTokens: maxTokens || 1600, temperature: 0.7 };
+    if (wantJSON) { genCfg.responseMimeType = "application/json"; genCfg.temperature = 0.4; }
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: userMsg }] }],
-        generationConfig: { maxOutputTokens: maxTokens || 1600, temperature: 0.7 }
+        generationConfig: genCfg
       })
     });
     if (!res.ok) {
@@ -2080,12 +2136,21 @@ ${text}
   }
 
   /* ============================ 유틸 ============================ */
+  /* 제약에서 '전체 글'의 글자수 상한만 골라낸다.
+     '그중 하나는 6자 이하의 짧은 문장'처럼 문장·단어 단위 조건을 전체 상한으로
+     오인하면 카운터가 6자로 잡히는 문제가 있었다. */
   function extractCharLimit(constraints) {
+    let best = 0;
     for (const c of (constraints || [])) {
-      const m = String(c).match(/(\d+)\s*자\s*(이내|이하)/);
-      if (m) return parseInt(m[1], 10);
+      const s = String(c);
+      if (/문장|단어|어절|제목|각\s/.test(s)) continue;   // 부분 단위 조건은 제외
+      const m = s.match(/(\d+)\s*자\s*(이내|이하)/);
+      if (!m) continue;
+      const v = parseInt(m[1], 10);
+      if (v < 50) continue;                               // 전체 글 상한으로 보기엔 너무 작음
+      best = best ? Math.min(best, v) : v;                // 여러 개면 가장 엄격한 값
     }
-    return 0;
+    return best;
   }
 
   /* ============================ 실전 말하기 ============================ */
@@ -2376,7 +2441,12 @@ ${text}
 {"drills":[
   {"dim":"축 key","q":"질문 (예: 어느 쪽이 더 구체적인가요?)","a":"덜 좋은 보기","b":"더 좋은 보기",
    "why":"A는 ... B는 ... 형태로 차이와 그 이유를 2~3문장","principle":"기억할 원칙 한 문장"}
-]}`;
+]}
+
+## JSON 형식 주의 (반드시)
+- 값 안에 큰따옴표(")를 쓰지 마세요. 인용이 필요하면 홑따옴표(')나 그냥 따옴표 없이 쓰세요.
+- 값 안에서 줄바꿈하지 마세요.
+- 마지막 항목 뒤에 콤마를 붙이지 마세요.`;
 
   function drillGenUserMessage(dim, n) {
     const d = dimOf(dim);
@@ -2437,7 +2507,7 @@ ${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 축의 새 문제
     }
     let added = 0;
     try {
-      const raw = await callAI(DRILL_GEN_SYSTEM, drillGenUserMessage(dim, 8), 3072);
+      const raw = await callAI(DRILL_GEN_SYSTEM, drillGenUserMessage(dim, 8), 3072, true);
       const j = extractJSON(raw);
       const list = Array.isArray(j.drills) ? j.drills : [];
       state.drills.generated = state.drills.generated || [];
