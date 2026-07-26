@@ -67,9 +67,12 @@
       </div>
 
       <div class="card">
-        <h2>🎯 나의 목표</h2>
+        <h2>🎯 나의 목표 <span class="sub">커리큘럼의 기준</span></h2>
         <p id="progress-goals" class="muted">아직 목표를 설정하지 않았어요.</p>
+        <div id="goal-read-box"></div>
         <button class="btn ghost small" id="edit-goals">목표 수정</button>
+        <button class="btn ghost small" id="replan-goal">목표에 맞춰 다시 계획 <span class="muted">(호출 1회)</span></button>
+        <p id="goal-status" class="notify-status"></p>
       </div>
 
       <div class="card" id="quality-card" style="display:none">

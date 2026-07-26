@@ -39,6 +39,10 @@
       activePractice: null,   // 진행 중 실전 연습
       diagnosis: null,        // AI 진단 결과 { status, level, summary, strengths, weaknesses, advice }
       plan: {},               // 맞춤 커리큘럼 { day: skillId }
+      planFrom: 0,            // 이 계획이 어느 Day부터 적용되는지
+      focusWhy: {},           // { skillId: 목표와의 연결 이유 }
+      recommendCats: [],      // 목표에 맞는 실전 말하기 카테고리
+      planStale: false,       // 목표가 바뀌었는데 계획을 다시 짜지 않은 상태
       quality: [],            // 품질 6축 추이 [{date, day, scores, avg}]
       drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
       aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
@@ -69,6 +73,10 @@
     if (typeof set.aiSaver !== "boolean") set.aiSaver = true;
     if (typeof set.autoGenDrills !== "boolean") set.autoGenDrills = true;
     if (!s.plan) s.plan = {};
+    if (!s.focusWhy) s.focusWhy = {};
+    if (!s.recommendCats) s.recommendCats = [];
+    if (typeof s.planFrom !== "number") s.planFrom = 0;
+    if (typeof s.planStale !== "boolean") s.planStale = false;
     if (!s.quality) s.quality = [];
     if (!s.drills) s.drills = { done: [], correct: 0, total: 0 };
     if (!s.aiUsage) s.aiUsage = { date: "", count: 0 };
@@ -662,6 +670,12 @@ ${text}
   const DIAG_SYSTEM = `당신은 한국어 글쓰기·말하기 진단 전문가입니다. 언어학·교육심리학·수사학 이론에 근거해
 학습자의 첫 글을 진단하고 맞춤 커리큘럼을 설계합니다.
 
+## 가장 먼저 할 일 — 목표 해석
+학습자가 적은 목표를 먼저 읽고, **그 목표가 어떤 장르·상황의 글/말인지** 규정하세요.
+그리고 그 장르에서 '잘한다'가 무엇인지 정한 뒤, **그 기준에 비추어** 진단하고 커리큘럼을 고르세요.
+같은 글이라도 목표가 '업무 보고'면 간결성·두괄식이 급하고, '에세이'면 구체성·목소리가 급합니다.
+기술을 고를 때마다 "이것이 이 사람의 목표에 왜 필요한가"를 답할 수 있어야 합니다.
+
 진단 기준(이 틀로 분석하세요):
 - 문장 수준: 간결성(군더더기), 능동/피동, 문장 길이 변주와 리듬, 종결어미 반복
 - 문단 수준: 두괄식(핵심 선행), 한 문단 한 생각, 문장 간 논리적 응결성(cohesion)
@@ -676,11 +690,23 @@ ${text}
   "summary": "총평 두 문장. 학습자의 글에서 실제로 관찰된 특징을 근거로.",
   "strengths": [{"point":"강점 이름","quote":"학습자 글에서 그대로 인용한 짧은 구절","why":"왜 좋은지 이론적으로 한 문장"}],
   "weaknesses": [{"skillId":"아래 목록의 id","label":"약점 이름","quote":"문제가 드러난 학습자 글의 짧은 인용","why":"무엇이 왜 문제인지 한두 문장","fix":"어떻게 고치면 되는지 한 문장"}],
-  "writeFocus": ["구조 기술 id 2개 — 첫 주에 다룰 순서대로"],
-  "speakFocus": ["말하기 기술 id 2개 — 순서대로"],
-  "qualityFocus": ["품질 기술 id 2개 — 이 학습자의 글에서 가장 시급한 품질 축부터"],
+  "goalRead": {
+    "genre": "학습자가 잘하고 싶은 글/말의 종류를 한 마디로 (예: 업무 보고서, 발표 스피치, 에세이, 면접 답변)",
+    "audience": "그 글/말의 독자·청자가 누구인가",
+    "criteria": "그 장르에서 '잘한다'는 것이 무엇인지 두 문장. 이 학습자의 목표 기준으로.",
+    "gap": "그 기준과 지금 글 사이의 가장 큰 간격 한 문장"
+  },
+  "writeFocus": ["구조 기술 id 4개 — 목표에 가까운 순서대로 (2주치)"],
+  "speakFocus": ["말하기 기술 id 4개 — 순서대로 (2주치)"],
+  "qualityFocus": ["품질 기술 id 4개 — 목표 장르에서 가장 중요한 품질 축부터 (2주치)"],
+  "focusWhy": {"기술id": "이 기술이 학습자의 목표에 왜 필요한지 한 문장. 목표를 직접 언급할 것."},
+  "recommendCats": ["실전 말하기 카테고리 key 1~3개 — 목표와 관련된 것만"],
   "advice": "첫 주에 특히 신경 쓸 것을 3~4문장으로. 학습자의 목표와 연결해서."
 }
+목표가 비어 있으면 goalRead는 글 자체에서 추론하고, genre를 "(목표 미지정)"으로 두세요.
+focusWhy에는 writeFocus·speakFocus·qualityFocus에 넣은 모든 id를 키로 포함하세요.
+recommendCats는 다음 중에서만 고르세요: drink(술자리·회식), mt(모임·MT), present(발표·PT),
+meeting(회의·미팅), interview(면접), work(직장 대화), events(경조사·행사), daily(일상 대화), relation(관계·감정).
 strengths는 1~2개, weaknesses는 2~3개. quote는 반드시 학습자 글의 실제 표현이어야 합니다(없으면 빈 문자열).
 skillId·writeFocus·speakFocus·qualityFocus는 반드시 주어진 id 목록에서만 고르세요.
 weaknesses의 skillId는 구조·품질 목록 어디서든 고를 수 있습니다.`;
@@ -728,7 +754,11 @@ ${ql}
     for (let d = fromDay; d <= toDay; d++) if (trackForDay(d) === track) out.push(d);
     return out;
   }
-  function buildPlanFromFocus(writeFocus, speakFocus, qualityFocus) {
+  /* fromDay 부터 2주치(14일)를 배치한다. 목표에 맞춘 순서를 오래 유지하려면
+     1주만 짜서는 부족하다 — 2주차 이후 목표 영향이 사라지기 때문이다. */
+  function buildPlanFromFocus(writeFocus, speakFocus, qualityFocus, fromDay) {
+    const start = fromDay || 2;
+    const end = start + 13;
     const pick = (ids, pool) => (ids || []).filter(id => pool.find(l => l.id === id));
     const map = [
       ["write", pick(writeFocus, WRITE_POOL)],
@@ -737,7 +767,7 @@ ${ql}
     ];
     const plan = {};
     map.forEach(([track, ids]) => {
-      const days = daysForTrack(track, 2, 8);
+      const days = daysForTrack(track, start, end);
       days.forEach((d, i) => { if (ids[i]) plan[String(d)] = ids[i]; });
     });
     return plan;
@@ -758,9 +788,13 @@ ${ql}
         status: "done", source: "ai",
         level: j.level || "", levelWhy: j.levelWhy || "",
         summary: j.summary || "", strengths: j.strengths || [],
-        weaknesses: weaknesses, advice: j.advice || "", date: todayStr()
+        weaknesses: weaknesses, advice: j.advice || "", date: todayStr(),
+        goalRead: j.goalRead || null, goalText: state.goals || ""
       };
-      state.plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus);
+      state.focusWhy = j.focusWhy || {};
+      state.recommendCats = (j.recommendCats || []).filter(k => PRACTICE_CATS.find(c => c.key === k));
+      state.planFrom = 2;
+      state.plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus, 2);
       // 약점을 기술 추적에 심어 간격 반복이 다시 꺼내게 한다
       weaknesses.forEach(w => {
         state.skills[w.skillId] = { rating: 1, seen: 0, lastDay: 0 };
@@ -783,13 +817,137 @@ ${ql}
         date: todayStr()
       };
       const ofTrack = (t) => ws.filter(w => (byId(w.skillId) || {}).track === t).map(w => w.skillId);
-      state.plan = buildPlanFromFocus(ofTrack("write"), ofTrack("speak"), ofTrack("quality"));
+      state.planFrom = 2;
+      state.plan = buildPlanFromFocus(ofTrack("write"), ofTrack("speak"), ofTrack("quality"), 2);
       ws.forEach(w => { state.skills[w.skillId] = { rating: 1, seen: 0, lastDay: 0 }; });
     }
     _diagRunning = false;
     save();
     renderToday();
     renderProgress();
+  }
+
+  /* ---- 목표 기반 재설계 ----
+   * 목표를 수정했거나 2주 계획을 다 쓴 뒤, 그동안 쌓인 데이터로 다시 계획한다.
+   * 전체 재진단(글 재분석)이 아니라 '계획'만 다시 짜므로 입력이 작다. */
+  const PLAN_SYSTEM = `당신은 글쓰기·말하기 학습 커리큘럼 설계자입니다. 학습자의 목표와 그동안의 학습 데이터를 보고
+다음 2주 커리큘럼을 설계합니다.
+
+## 원칙
+- 학습자의 목표가 최우선 기준입니다. 목표 장르에서 '잘한다'가 무엇인지 정하고, 그것에 가까워지는
+  순서로 기술을 배열하세요. 같은 약점이라도 목표에 덜 중요하면 뒤로 미룹니다.
+- 자기평가가 낮은 기술(아직 어려움)과 품질 점수가 낮은 축을 앞에 둡니다(의도적 연습).
+- 이미 편해진 기술은 넣지 마세요(비계 제거).
+- 각 기술마다 "이것이 이 목표에 왜 필요한가"를 목표를 직접 언급해 한 문장으로 밝히세요.
+
+## 아래 JSON만 출력 (코드블록·설명 금지)
+{
+  "goalRead": {"genre":"목표 장르 한 마디","audience":"독자·청자","criteria":"그 장르에서 잘한다는 것 두 문장","gap":"지금과의 간격 한 문장"},
+  "writeFocus": ["구조 기술 id 4개"],
+  "qualityFocus": ["품질 기술 id 4개"],
+  "speakFocus": ["말하기 기술 id 4개"],
+  "focusWhy": {"기술id":"목표와의 연결 한 문장"},
+  "recommendCats": ["실전 카테고리 key 1~3개"],
+  "advice": "다음 2주 학습 방향 3~4문장"
+}
+id는 반드시 주어진 목록에서만 고르세요.`;
+
+  function planUserMessage(fromDay) {
+    const listOf = (pool) => pool.map(l => {
+      const sk = state.skills[l.id];
+      const mark = sk ? (sk.rating === 1 ? " [아직 어려움]" : sk.rating === 2 ? " [그럭저럭]" : " [편해짐]") : " [미학습]";
+      return `${l.id}: ${l.skill}${l.dim ? ` (${(dimOf(l.dim) || {}).label || ""})` : ""}${mark}`;
+    }).join("\n");
+    const hist = state.quality || [];
+    const qLine = hist.length
+      ? QUALITY_DIMS.map(d => {
+          const vals = hist.map(h => h.scores && h.scores[d.key]).filter(v => typeof v === "number");
+          const avg = vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : "-";
+          return `${d.label} ${avg}`;
+        }).join(" / ")
+      : "(아직 독자 리포트 없음)";
+    const recent = state.sessions.filter(s => s.lessonId !== "diagnostic").slice(-6)
+      .map(s => `Day ${s.day} ${s.skill}${s.selfRating ? ` (자기평가 ${s.selfRating}/3)` : ""}`).join("\n") || "(없음)";
+    return `[학습자 목표]
+${state.goals || "(밝히지 않음)"}
+
+[품질 6축 평균 — 낮은 축이 시급]
+${qLine}
+
+[최근 학습 이력]
+${recent}
+
+[구조 기술 목록]
+${listOf(WRITE_POOL)}
+
+[품질 기술 목록]
+${listOf(QUALITY_POOL)}
+
+[말하기 기술 목록]
+${listOf(SPEAK_POOL)}
+
+Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
+  }
+
+  let _planRunning = false;
+  async function replanFromGoal(statusSel) {
+    if (_planRunning || !aiReady()) return false;
+    _planRunning = true;
+    const st = statusSel ? $(statusSel) : null;
+    if (st) { st.textContent = "목표에 맞춰 커리큘럼을 다시 설계하고 있어요…"; st.className = "notify-status"; }
+    const fromDay = state.currentDay + 1;
+    try {
+      const raw = await callAI(PLAN_SYSTEM, planUserMessage(fromDay), 2048);
+      const j = extractJSON(raw);
+      const plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus, fromDay);
+      if (!Object.keys(plan).length) throw new Error("유효한 기술 id가 없습니다");
+      state.plan = plan;
+      state.planFrom = fromDay;
+      state.focusWhy = Object.assign({}, state.focusWhy, j.focusWhy || {});
+      state.recommendCats = (j.recommendCats || []).filter(k => PRACTICE_CATS.find(c => c.key === k));
+      if (state.diagnosis) {
+        state.diagnosis.goalRead = j.goalRead || state.diagnosis.goalRead;
+        state.diagnosis.goalText = state.goals || "";
+        if (j.advice) state.diagnosis.advice = j.advice;
+      }
+      state.planStale = false;
+      save();
+      if (st) { st.textContent = `Day ${fromDay}부터 2주 커리큘럼을 새로 짰어요.`; st.className = "notify-status ok"; }
+      renderAll();
+      return true;
+    } catch (e) {
+      if (st) { st.textContent = "재설계 실패: " + e.message; st.className = "notify-status err"; }
+      return false;
+    } finally { _planRunning = false; }
+  }
+
+  /* 목표가 커리큘럼에 어떻게 반영됐는지 보여주는 카드 */
+  function viewGoalReflection() {
+    const d = state.diagnosis;
+    const gr = d && d.goalRead;
+    const why = state.focusWhy || {};
+    const planned = Object.keys(state.plan || {}).sort((a, b) => a - b);
+    const rows = planned.map(day => {
+      const l = byId(state.plan[day]);
+      if (!l) return "";
+      const r = why[l.id];
+      return `<li><b>Day ${day}</b> · ${esc(l.skill)}${r ? `<div class="focus-why">${esc(r)}</div>` : ""}</li>`;
+    }).filter(Boolean).join("");
+    if (!gr && !rows) return "";
+    return `
+      <div class="card">
+        <h2>🎯 목표가 커리큘럼에 반영된 방식</h2>
+        ${state.goals ? `<div class="goal-quote">“${esc(state.goals)}”</div>` : `<p class="muted small">목표를 적으면 커리큘럼이 그 목표에 맞춰 재배치됩니다.</p>`}
+        ${gr ? `
+          <div class="goal-read">
+            <div class="gr-row"><span class="gr-k">장르</span><span>${esc(gr.genre || "-")}</span></div>
+            <div class="gr-row"><span class="gr-k">독자</span><span>${esc(gr.audience || "-")}</span></div>
+            <div class="gr-row"><span class="gr-k">잘한다는 것</span><span>${esc(gr.criteria || "-")}</span></div>
+            <div class="gr-row"><span class="gr-k">지금과의 간격</span><span>${esc(gr.gap || "-")}</span></div>
+          </div>` : ""}
+        ${rows ? `<div class="section-label">이 목표를 위해 이 순서로 훈련합니다</div>
+          <ul class="plan-list why">${rows}</ul>` : ""}
+      </div>`;
   }
 
   function viewDiagnosisReport() {
@@ -809,7 +967,8 @@ ${ql}
         ${w.fix ? `<div class="fix-line">→ ${esc(w.fix)}</div>` : ""}
       </div>`).join("");
     const planRows = [];
-    for (let day = 2; day <= 8; day++) {
+    const pStart = state.planFrom || 2;
+    for (let day = pStart; day <= pStart + 6; day++) {
       const t = trackForDay(day);
       if (t === "review") { planRows.push(`<li><b>Day ${day}</b> · 🔁 복습·통합</li>`); continue; }
       const sid = state.plan[String(day)];
@@ -830,9 +989,10 @@ ${ql}
           <span class="fb-h" style="color:var(--primary)">🧭 첫 주 조언</span>${esc(d.advice)}</div>` : ""}
         ${d.error ? `<p class="muted" style="font-size:12px">AI 진단 실패(${esc(d.error)}) — 규칙 기반으로 진행했습니다. 설정에서 키를 확인해보세요.</p>` : ""}
       </div>
+      ${viewGoalReflection()}
       <div class="card">
-        <h2>🗺️ 나에게 맞춘 첫 주 커리큘럼</h2>
-        <p class="muted small">진단에서 나온 약점을 앞쪽에 배치했어요. 진행하면서 자동으로 조정됩니다.</p>
+        <h2>🗺️ 나에게 맞춘 커리큘럼</h2>
+        <p class="muted small">목표와 진단 결과를 반영해 배치했어요. 진행하면서 자동으로 조정됩니다.</p>
         <ul class="plan-list">${planRows.join("")}</ul>
       </div>`;
   }
@@ -898,6 +1058,10 @@ ${ql}
         <span class="lbl">🎯 오늘의 목표 · ${esc(L.skill)}</span>
         <p>${esc(L.goal)}</p>
       </div>
+
+      ${(state.focusWhy || {})[L.id] ? `<div class="fb-block fb-next">
+        <span class="fb-h">🧭 내 목표와의 연결</span>${esc(state.focusWhy[L.id])}
+      </div>` : ""}
 
       <div class="section-label">왜 이 기술인가</div>
       <p class="why-text">${esc(L.why)}</p>
@@ -1423,7 +1587,30 @@ ${ql}
 
     const g = $("#progress-goals");
     g.textContent = state.goals || "아직 목표를 설정하지 않았어요.";
-    g.className = state.goals ? "" : "muted";
+    g.className = state.goals ? "goal-quote" : "muted";
+    // 목표 해석 + 계획 상태
+    const grBox = $("#goal-read-box");
+    if (grBox) {
+      const gr = state.diagnosis && state.diagnosis.goalRead;
+      const planEnd = state.planFrom ? state.planFrom + 13 : 0;
+      const runningOut = planEnd && state.currentDay >= planEnd - 2;
+      let html = "";
+      if (gr) {
+        html += `<div class="goal-read">
+          <div class="gr-row"><span class="gr-k">장르</span><span>${esc(gr.genre || "-")}</span></div>
+          <div class="gr-row"><span class="gr-k">독자</span><span>${esc(gr.audience || "-")}</span></div>
+          <div class="gr-row"><span class="gr-k">잘한다는 것</span><span>${esc(gr.criteria || "-")}</span></div>
+        </div>`;
+      }
+      if (state.planStale) {
+        html += `<p class="plan-warn">⚠️ 목표가 바뀐 뒤 커리큘럼을 다시 짜지 않았어요. 아래 ‘다시 계획’을 눌러주세요.</p>`;
+      } else if (runningOut) {
+        html += `<p class="plan-warn">📅 계획한 2주가 거의 끝났어요. ‘다시 계획’으로 다음 2주를 목표에 맞춰 받으세요.</p>`;
+      } else if (state.planFrom) {
+        html += `<p class="muted small">현재 계획: Day ${state.planFrom}~${planEnd} (목표 기준으로 배치됨)</p>`;
+      }
+      grBox.innerHTML = html;
+    }
 
     // 기술 그리드 — 트랙별로 묶어서 표시
     const grid = $("#skill-grid");
@@ -1637,8 +1824,27 @@ ${ql}
     });
     $("#test-ai").addEventListener("click", testAI);
     $("#edit-goals").addEventListener("click", () => {
-      const g = prompt("목표를 수정하세요:", state.goals || "");
-      if (g !== null) { state.goals = g.trim(); save(); renderProgress(); }
+      const g = prompt("어떤 글이나 말을 잘하고 싶나요?\n(자세히 적을수록 커리큘럼이 정확해집니다)", state.goals || "");
+      if (g === null) return;
+      const next = g.trim();
+      const changed = next !== (state.goals || "");
+      state.goals = next;
+      if (changed) state.planStale = true;   // 목표가 바뀌면 계획을 다시 짜야 한다
+      save(); renderProgress();
+      if (changed && aiReady()) {
+        if (confirm("목표가 바뀌었어요. 새 목표에 맞춰 커리큘럼을 다시 계획할까요? (AI 호출 1회)")) {
+          replanFromGoal("#goal-status");
+        } else {
+          setStatus("#goal-status", "계획은 그대로예요. 나중에 ‘다시 계획’을 눌러도 됩니다.", "");
+        }
+      } else if (changed) {
+        setStatus("#goal-status", "목표를 저장했어요. AI 키를 넣으면 이 목표에 맞춰 커리큘럼을 다시 짤 수 있어요.", "");
+      }
+    });
+    $("#replan-goal").addEventListener("click", () => {
+      if (!aiReady()) { setStatus("#goal-status", "설정에서 AI를 켜고 키를 넣어주세요.", "err"); return; }
+      if (!state.goals) { setStatus("#goal-status", "먼저 목표를 적어주세요.", "err"); return; }
+      replanFromGoal("#goal-status");
     });
     $("#export-data").addEventListener("click", exportData);
     $("#reset-data").addEventListener("click", () => {
@@ -2276,6 +2482,17 @@ ${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 축의 새 문제
       const n = c.key === "all" ? SITUATIONS.length : SITUATIONS.filter(s => s.cat === c.key).length;
       return `<button class="cat-chip ${practiceCat === c.key ? "active" : ""}" data-cat="${c.key}">${c.emoji} ${esc(c.label)}<span class="n">${n}</span></button>`;
     }).join("");
+    /* 목표에 맞는 카테고리를 추천 (진단·재계획에서 받은 recommendCats) */
+    const rec = (state.recommendCats || []).filter(k => PRACTICE_CATS.find(c => c.key === k));
+    const recCard = (rec.length && practiceCat === "all") ? `
+      <div class="rec-box">
+        <div class="rec-head">🧭 내 목표에 맞는 상황</div>
+        <div class="rec-chips">${rec.map(k => {
+          const c = PRACTICE_CATS.find(x => x.key === k);
+          const n = SITUATIONS.filter(s => s.cat === k).length;
+          return `<button class="cat-chip rec" data-cat="${k}">${c.emoji} ${esc(c.label)}<span class="n">${n}</span></button>`;
+        }).join("")}</div>
+      </div>` : "";
     const list = SITUATIONS.filter(s => practiceCat === "all" || s.cat === practiceCat);
     const cards = list.map(s => {
       const cat = PRACTICE_CATS.find(c => c.key === s.cat);
@@ -2296,6 +2513,7 @@ ${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 축의 새 문제
         <h2 style="margin-bottom:6px">🎤 실전 상황별 말하기</h2>
         <p class="practice-intro">한국인이 자주 겪는 스피치 상황 <b>${SITUATIONS.length}개</b>. 상황을 골라 실제로 말하고,
         핵심 포인트 점검 · 모범 답변 대비 · 피드백으로 연습하세요.${doneCount ? ` <b>${doneCount}회</b> 연습함.` : ""}</p>
+        ${recCard}
         <div class="cat-scroll">${chips}</div>
       </div>
       <div>${cards}</div>`;
