@@ -131,6 +131,14 @@
         <label class="row-check">
           <input type="checkbox" id="set-ai-enabled"> AI 피드백 사용
         </label>
+        <label class="row-check">
+          <input type="checkbox" id="set-ai-saver"> 절약 모드 — 버튼을 누를 때만 AI 호출
+        </label>
+        <p class="muted" style="font-size:12px; margin-top:4px">
+          절약 모드를 켜면 피드백이 자동으로 호출되지 않고, 필요할 때만 <b>“피드백 받기”</b>를 눌러 사용합니다.
+          한 번 받은 피드백은 저장되어 다시 호출하지 않아요.
+        </p>
+        <p class="usage-row">오늘 AI 호출: <b id="ai-usage-count">0</b>회</p>
         <button class="btn primary" id="save-settings">저장</button>
         <button class="btn ghost small" id="test-ai">연결 테스트</button>
         <p id="ai-status" class="notify-status"></p>

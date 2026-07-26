@@ -34,8 +34,12 @@
       lastWeeklyReviewDay: 0,
       practices: [],          // 실전 말하기 연습 기록
       activePractice: null,   // 진행 중 실전 연습
+      diagnosis: null,        // AI 진단 결과 { status, level, summary, strengths, weaknesses, advice }
+      plan: {},               // 맞춤 커리큘럼 { day: skillId }
+      aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
       settings: {
         aiEnabled: false,
+        aiSaver: true,        // 절약 모드: AI 피드백을 탭할 때만 호출
         provider: "gemini",   // 'gemini'(무료) | 'anthropic'(유료)
         gemini: { key: "", model: "gemini-2.5-flash" },
         anthropic: { key: "", model: "claude-sonnet-5" }
@@ -56,6 +60,9 @@
   function normalizeSettings(s) {
     const set = s.settings = s.settings || {};
     if (typeof set.aiEnabled !== "boolean") set.aiEnabled = false;
+    if (typeof set.aiSaver !== "boolean") set.aiSaver = true;
+    if (!s.plan) s.plan = {};
+    if (!s.aiUsage) s.aiUsage = { date: "", count: 0 };
     if (!set.provider) set.provider = "gemini";
     if (!set.gemini) set.gemini = { key: "", model: "gemini-2.5-flash" };
     if (!set.anthropic) set.anthropic = { key: set.apiKey || "", model: set.model || "claude-sonnet-5" };
@@ -82,54 +89,112 @@
   function metrics(t) {
     const sents = splitSentences(t);
     const lens = sents.map(charLen);
+    const n = lens.length;
+    const mean = n ? lens.reduce((a, b) => a + b, 0) / n : 0;
+    const sd = n ? Math.sqrt(lens.reduce((a, b) => a + (b - mean) * (b - mean), 0) / n) : 0;
     return {
       chars: charLen(t),
-      sentences: sents.length,
+      sentences: n,
       lens,
-      longest: lens.length ? Math.max(...lens) : 0,
-      shortest: lens.length ? Math.min(...lens) : 0,
-      fillers: countMatches(t, /것(?![가-힣])|수\s*있|에\s*대(해|하여|한)|라고\s*생각|인\s*것\s*같|매우|정말|너무|좀|약간/g),
+      mean: Math.round(mean),
+      sd: Math.round(sd),
+      longest: n ? Math.max(...lens) : 0,
+      shortest: n ? Math.min(...lens) : 0,
+      fillers: countMatches(t, /것(이|을|은|도|과|처럼|만|입니|이다|같)?|수\s*있|에\s*대(해|하여|한)|라고\s*생각|생각(된|되는|됩|이\s*든)|느껴(진|집)|부분(이|을|은)?\s*있|측면|경우가\s*많|하게\s*되|지게\s*되|매우|정말|너무|굉장히|상당히|좀|약간|다소/g),
       passives: countMatches(t, /되었|되어|되는|어졌|아졌|여졌|당하|지어/g),
       connectors: countMatches(t, /그리고|그래서|하지만|그러나|또한|그런데|따라서|그러므로/g),
-      emotionWords: countMatches(t, /행복|슬프|슬픔|기쁘|기쁨|감동|좋았|힘들|즐거|재미있|아름답|설레/g)
+      emotionWords: countMatches(t, /행복|슬프|슬픔|기쁘|기쁨|감동|좋았|힘들|즐거|재미있|아름답|설레/g),
+      // ↓ 확장 지표 (API 없이 쓸모 있는 분석을 위해)
+      hedges: countMatches(t, /같아요|같다|듯하|아마|어느\s*정도|조금|약간|나름|그럭저럭|일단/g),
+      senses: countMatches(t, /보이|보였|들리|들렸|소리|냄새|향|맛|차갑|따뜻|뜨겁|시원|축축|거칠|부드럽|빛|어둡|환하/g),
+      numbers: countMatches(t, /\d+(\.\d+)?\s*(%|퍼센트|명|개|번|원|배|건|일|주|달|년|시간|분)/g),
+      conjTails: countMatches(t, /(고|며|서|는데|지만|나까|므로)\s*,?\s*(?=[가-힣])/g),
+      sameEnding: maxSameEndingRun(sents),
+      longRatio: n ? Math.round(lens.filter(l => l > 60).length / n * 100) : 0,
+      firstLen: n ? lens[0] : 0,
+      questions: countMatches(t, /\?/g),
+      quotes: countMatches(t, /["“'']/g)
     };
+  }
+  /* 문장 종결어미가 연속으로 같은 최대 횟수 (리듬 단조로움 탐지) */
+  function maxSameEndingRun(sents) {
+    const endOf = (s) => {
+      const m = String(s).trim().match(/(습니다|입니다|했다|한다|이다|있다|었다|아요|어요|예요|네요|겠다|자|요)$/);
+      return m ? m[1] : "";
+    };
+    let best = 1, run = 1;
+    for (let i = 1; i < sents.length; i++) {
+      const a = endOf(sents[i - 1]), b = endOf(sents[i]);
+      if (a && a === b) { run++; best = Math.max(best, run); } else run = 1;
+    }
+    return sents.length ? best : 0;
+  }
+  /* 규칙 기반 진단 — API 없이 약점 후보를 커리큘럼 기술로 매핑 */
+  function localDiagnose(text) {
+    const m = metrics(text);
+    const findings = [];
+    const add = (skillId, why) => { if (!findings.find(f => f.skillId === skillId)) findings.push({ skillId, why }); };
+    const per = m.sentences ? m.fillers / m.sentences : 0;
+    if (m.fillers >= 3 || per >= 0.8) add("concision", `군더더기 후보 표현이 ${m.fillers}회(문장당 ${per.toFixed(1)}회) 나타납니다 — ‘것/수 있다/생각된다/부분이 있다’ 같은 표현이 서술어를 감쌉니다.`);
+    if (m.hedges >= 3) add("concision", `‘~같아요/아마/조금’ 같은 완충 표현이 ${m.hedges}회 — 문장이 흐려집니다.`);
+    if (m.passives >= 2) add("active-voice", `피동 표현이 ${m.passives}회 — 행위자가 숨습니다.`);
+    if (m.sd <= 10 && m.sentences >= 3) add("sentence-rhythm", `문장 길이 편차가 작습니다(표준편차 ${m.sd}자) — 리듬이 단조롭습니다.`);
+    if (m.sameEnding >= 3) add("sentence-rhythm", `같은 종결어미가 ${m.sameEnding}문장 연속됩니다.`);
+    if (m.conjTails >= Math.max(3, Math.round(m.sentences * 1.2))) add("connectors", `‘~고/~며/~서’로 이어 붙인 연결이 ${m.conjTails}회 — 문장을 끊어야 합니다.`);
+    if (m.connectors >= 3) add("connectors", `접속사를 ${m.connectors}회 사용 — 내용으로 잇는 연습이 필요합니다.`);
+    if (m.emotionWords >= 2 && m.senses <= 1) add("concreteness", `감정·평가 단어 ${m.emotionWords}회에 비해 감각 묘사는 ${m.senses}회 — 추상적입니다.`);
+    if (m.senses === 0 && m.chars >= 150) add("concreteness", "보이고 들리는 감각 묘사가 없어 장면이 그려지지 않습니다.");
+    if (m.longRatio >= 40) add("sentence-rhythm", `60자 넘는 긴 문장이 전체의 ${m.longRatio}%입니다.`);
+    if (m.numbers === 0 && m.chars >= 200) add("argument", "구체적 수치·사례가 없어 주장이 떠 있습니다.");
+    if (m.firstLen >= 60) add("topic-first", `첫 문장이 ${m.firstLen}자로 길어, 핵심이 앞에서 또렷하지 않습니다.`);
+    if (!findings.length) add("topic-first", "표면 지표는 양호합니다. 다음은 문단 구성(두괄식)으로 올라가 봅시다.");
+    return { metrics: m, findings: findings.slice(0, 4) };
   }
 
   /* -------------------- 오프라인(자기 주목형) 피드백 -------------------- */
   /* AI 없이도 '구체적 관찰 + 스스로 발견 질문'을 제공한다(주목 가설).       */
   function localObservation(lesson, text) {
     const m = metrics(text);
+    const base = `분량 <b>${m.chars}자</b> · 문장 <b>${m.sentences}개</b> · 평균 ${m.mean}자(편차 ${m.sd})`;
     let obs = [];
     switch (lesson.id) {
       case "concision":
-        obs.push(`글자 수 <b>${m.chars}자</b>, 군더더기 후보 표현 <b>${m.fillers}회</b> 감지.`);
-        obs.push(m.fillers > 3 ? "빼도 뜻이 사는 표현이 아직 남아 있을 가능성이 높아요." : "군더더기를 잘 걷어냈네요. 한 번 더 훑어보세요.");
+        obs.push(`군더더기 후보 <b>${m.fillers}회</b>, 완충 표현('~같아요/아마') <b>${m.hedges}회</b>.`);
+        obs.push(m.fillers + m.hedges > 3 ? "빼도 뜻이 사는 표현이 남아 있을 가능성이 높아요. 단어마다 '없으면 뜻이 달라지나?' 물어보세요." : "잘 걷어냈어요. 수식어를 한 번 더 줄일 수 있는지 보세요.");
         break;
       case "active-voice":
-        obs.push(`피동 표현 <b>${m.passives}회</b> 감지, 문장 <b>${m.sentences}개</b>.`);
-        obs.push(m.passives > 1 ? "피동 문장에 '누가 한 일인지' 물어보세요." : "행위자가 대체로 잘 드러나 있어요.");
+        obs.push(`피동 표현 <b>${m.passives}회</b>.`);
+        obs.push(m.passives > 1 ? "피동 문장마다 '누가 한 일인지' 물어 주어를 되살리세요." : "행위자가 대체로 잘 드러나 있어요.");
         break;
       case "sentence-rhythm":
-        obs.push(`문장 길이(글자): <b>${m.lens.join(", ") || "-"}</b>. 가장 긺 ${m.longest}, 가장 짧음 ${m.shortest}.`);
-        obs.push((m.longest - m.shortest) < 12 ? "길이 편차가 작아요. 하나를 아주 짧게 쳐 보세요." : "길이 변주가 살아 있어요. 핵심 문장이 가장 짧은가요?");
+        obs.push(`문장 길이: <b>${m.lens.join(", ") || "-"}</b>자. 같은 종결어미 연속 최대 <b>${m.sameEnding}회</b>.`);
+        obs.push(m.sd <= 10 ? "편차가 작아 리듬이 단조로워요. 핵심 문장 하나를 아주 짧게 쳐 보세요." : "길이 변주가 살아 있어요. 가장 중요한 문장이 가장 짧은지 확인하세요.");
+        if (m.sameEnding >= 3) obs.push("종결어미가 반복되면 낭독할 때 지루해집니다.");
         break;
       case "connectors":
-        obs.push(`접속사 <b>${m.connectors}회</b> 사용, 문장 <b>${m.sentences}개</b>.`);
-        obs.push(m.connectors > 0 ? "접속사를 빼도 흐름이 유지되는지 시험해 보세요." : "접속사 없이 이었네요. 내용으로 연결됐는지 확인해 보세요.");
+        obs.push(`접속사 <b>${m.connectors}회</b>, '~고/~며/~서' 연결 <b>${m.conjTails}회</b>.`);
+        obs.push(m.connectors > 0 ? "접속사를 지워도 흐름이 유지되는지 시험해 보세요." : "접속사 없이 이었네요. 앞 문장의 말을 뒤 문장이 이어받았는지 보세요.");
         break;
       case "concreteness":
-        obs.push(`감정·평가 단어 <b>${m.emotionWords}회</b> 감지.`);
-        obs.push(m.emotionWords > 0 ? "그 단어를 '그 순간 본/들은 것'으로 바꿔 보세요." : "추상어를 잘 피했어요. 감각이 두 가지 이상 들어갔나요?");
+        obs.push(`감정·평가 단어 <b>${m.emotionWords}회</b> vs 감각 묘사 <b>${m.senses}회</b>.`);
+        obs.push(m.senses === 0 ? "감각어가 없어 장면이 그려지지 않아요. 그 순간 본 사물 하나를 넣으세요." : m.emotionWords > m.senses ? "감정어가 감각어보다 많아요. 감정 단어를 장면으로 바꿔보세요." : "감각으로 보여주기가 잘 됐어요.");
         break;
-      case "topic-first": case "one-idea": case "structure": case "argument": case "audience":
-        obs.push(`문단/문장 구성: 문장 <b>${m.sentences}개</b>, ${m.chars}자.`);
-        obs.push("첫 문장만 따로 읽어보세요 — 전체가 예측되나요?");
+      case "argument":
+        obs.push(`구체적 수치·사례 표현 <b>${m.numbers}회</b>.`);
+        obs.push(m.numbers === 0 ? "예시가 일반론에 머물 위험이 있어요. '언제·어디서·누가'를 넣어 장면으로 만드세요." : "근거가 구체적으로 뒷받침되고 있어요.");
+        break;
+      case "topic-first":
+        obs.push(`첫 문장 <b>${m.firstLen}자</b>(평균 ${m.mean}자).`);
+        obs.push(m.firstLen > m.mean * 1.4 ? "첫 문장이 평균보다 길어요. 핵심 주장을 짧고 단호하게 압축하세요." : "첫 문장 길이는 적절해요. 그 문장만 읽어도 문단이 예측되나요?");
+        break;
+      case "one-idea": case "structure": case "audience":
+        obs.push(`문단 구성: 문장 ${m.sentences}개, 질문형 ${m.questions}회.`);
+        obs.push("첫 문장만 따로 읽어보세요 — 전체가 예측되나요? 화제가 바뀌는 지점이 문단 경계입니다.");
         break;
       default:
-        obs.push(`분량 <b>${m.chars}자</b>, 문장 <b>${m.sentences}개</b>.`);
         obs.push("아래 질문으로 스스로 점검해 보세요.");
     }
-    return obs.join(" ");
+    return base + "<br>" + obs.join(" ");
   }
 
   /* ----------------------------- 스케줄러 ----------------------------- */
@@ -153,6 +218,12 @@
 
   function pickLesson(day, track) {
     const pool = track === "speak" ? SPEAK_POOL : WRITE_POOL;
+    // 진단으로 만든 맞춤 커리큘럼이 있으면 그 순서를 우선한다
+    const planned = state.plan && state.plan[String(day)];
+    if (planned) {
+      const l = pool.find(x => x.id === planned);
+      if (l) return l;
+    }
     // 3일마다, 그리고 약점이 있으면 약점을 다시 꺼내 인출 연습
     if (day % 3 === 0) {
       const w = weakestSkill(track);
@@ -253,6 +324,11 @@
     renderHeader();
     const root = $("#session-root");
     if (!state.onboarded) { root.innerHTML = viewDiagnostic(); wireDiagnostic(); return; }
+    if (state.diagnosis && state.diagnosis.status === "pending") {
+      root.innerHTML = viewDiagnosing();
+      runDiagnosis();
+      return;
+    }
     const sess = state.activeSession;
     if (!sess) { root.innerHTML = viewStart(); wireStart(); return; }
 
@@ -308,11 +384,190 @@
         skill: "진단 글쓰기", submission: text, noticed: "", retry: "",
         summary: "", selfRating: null, date: todayStr()
       });
+      state.diagnosis = { status: "pending", text: text };
       recordActivity();
       save();
       renderAll();
       switchTab("tab-today");
     });
+  }
+
+  /* ==================== 진단 엔진 (AI 1회 호출 + 맞춤 커리큘럼) ==================== */
+  function viewDiagnosing() {
+    const withAI = aiReady();
+    return `
+    <div class="session-step">
+      <div class="card" style="text-align:center; padding:30px 18px">
+        <div style="font-size:38px">🔍</div>
+        <h2 style="margin:8px 0 6px">진단 중입니다…</h2>
+        <p class="muted small">${withAI
+          ? "AI 코치가 당신의 글을 언어학·교육심리학 기준으로 분석하고, 맞춤 커리큘럼을 설계하고 있어요. (10~20초)"
+          : "글의 문장·문단 지표를 분석하고 있어요."}</p>
+        <p style="margin-top:14px"><span class="spinner"></span>분석 중</p>
+      </div>
+    </div>`;
+  }
+
+  const DIAG_SYSTEM = `당신은 한국어 글쓰기·말하기 진단 전문가입니다. 언어학·교육심리학·수사학 이론에 근거해
+학습자의 첫 글을 진단하고 맞춤 커리큘럼을 설계합니다.
+
+진단 기준(이 틀로 분석하세요):
+- 문장 수준: 간결성(군더더기), 능동/피동, 문장 길이 변주와 리듬, 종결어미 반복
+- 문단 수준: 두괄식(핵심 선행), 한 문단 한 생각, 문장 간 논리적 응결성(cohesion)
+- 글 전체: 구조(서론·본론·결론), 논증(주장-근거-예시), 독자 인식
+- 스타일: 구체성(추상어 vs 감각어), 비유, 목소리(voice)
+- 언어 발달 관점: Vygotsky의 근접발달영역 — 지금 혼자 되는 것과 도움받아 될 것을 구분
+
+반드시 아래 JSON 형식만 출력하세요. 코드블록·설명·인사말 금지, JSON 외 텍스트 금지.
+{
+  "level": "초급|중급|상급",
+  "levelWhy": "이 수준으로 판단한 근거를 한 문장",
+  "summary": "총평 두 문장. 학습자의 글에서 실제로 관찰된 특징을 근거로.",
+  "strengths": [{"point":"강점 이름","quote":"학습자 글에서 그대로 인용한 짧은 구절","why":"왜 좋은지 이론적으로 한 문장"}],
+  "weaknesses": [{"skillId":"아래 목록의 id","label":"약점 이름","quote":"문제가 드러난 학습자 글의 짧은 인용","why":"무엇이 왜 문제인지 한두 문장","fix":"어떻게 고치면 되는지 한 문장"}],
+  "writeFocus": ["글쓰기 기술 id 4개 — 첫 주에 다룰 순서대로"],
+  "speakFocus": ["말하기 기술 id 2개 — 순서대로"],
+  "advice": "첫 주에 특히 신경 쓸 것을 3~4문장으로. 학습자의 목표와 연결해서."
+}
+strengths는 1~2개, weaknesses는 2~3개. quote는 반드시 학습자 글의 실제 표현이어야 합니다(없으면 빈 문자열).
+skillId·writeFocus·speakFocus는 반드시 주어진 id 목록에서만 고르세요.`;
+
+  function diagUserMessage(text, goal) {
+    const wl = CURRICULUM.filter(l => l.track === "write").map(l => `${l.id}: ${l.skill}`).join("\n");
+    const sl = CURRICULUM.filter(l => l.track === "speak").map(l => `${l.id}: ${l.skill}`).join("\n");
+    const d = localDiagnose(text), m = d.metrics;
+    return `[학습자 목표]
+${goal || "(밝히지 않음)"}
+
+[학습자의 첫 글]
+${text}
+
+[기계 분석 참고치 — 판단에 활용하되 그대로 나열하지 마세요]
+글자 ${m.chars} / 문장 ${m.sentences} / 평균문장 ${m.mean}자(편차 ${m.sd}) / 문장길이 ${m.lens.join(",")}
+군더더기후보 ${m.fillers} / 완충표현 ${m.hedges} / 피동 ${m.passives} / 접속사 ${m.connectors} / 이어붙임 ${m.conjTails}
+감정어 ${m.emotionWords} / 감각어 ${m.senses} / 수치표현 ${m.numbers} / 동일종결어미연속 ${m.sameEnding}
+
+[글쓰기 기술 id 목록]
+${wl}
+
+[말하기 기술 id 목록]
+${sl}
+
+위 학습자를 진단하고 맞춤 커리큘럼을 JSON으로 설계하세요.`;
+  }
+
+  /* 모델이 코드블록이나 잡텍스트를 섞어도 JSON을 건져낸다 */
+  function extractJSON(s) {
+    let t = String(s).trim();
+    t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    const a = t.indexOf("{"), b = t.lastIndexOf("}");
+    if (a < 0 || b <= a) throw new Error("JSON 형식이 아닙니다");
+    return JSON.parse(t.slice(a, b + 1));
+  }
+
+  function buildPlanFromFocus(writeFocus, speakFocus) {
+    const wIds = (writeFocus || []).filter(id => WRITE_POOL.find(l => l.id === id));
+    const sIds = (speakFocus || []).filter(id => SPEAK_POOL.find(l => l.id === id));
+    const plan = {};
+    // TRACK_PATTERN(day2~): write,write,speak,write,write,speak,review
+    const writeDays = [2, 3, 5, 6], speakDays = [4, 7];
+    writeDays.forEach((d, i) => { if (wIds[i]) plan[String(d)] = wIds[i]; });
+    speakDays.forEach((d, i) => { if (sIds[i]) plan[String(d)] = sIds[i]; });
+    return plan;
+  }
+
+  let _diagRunning = false;
+  async function runDiagnosis() {
+    if (_diagRunning) return;
+    _diagRunning = true;
+    const text = state.diagnosis.text || "";
+    const local = localDiagnose(text);
+    try {
+      if (!aiReady()) throw new Error("__offline__");
+      const raw = await callAI(DIAG_SYSTEM, diagUserMessage(text, state.goals), 2048);
+      const j = extractJSON(raw);
+      const weaknesses = (j.weaknesses || []).filter(w => w && byId(w.skillId));
+      state.diagnosis = {
+        status: "done", source: "ai",
+        level: j.level || "", levelWhy: j.levelWhy || "",
+        summary: j.summary || "", strengths: j.strengths || [],
+        weaknesses: weaknesses, advice: j.advice || "", date: todayStr()
+      };
+      state.plan = buildPlanFromFocus(j.writeFocus, j.speakFocus);
+      // 약점을 기술 추적에 심어 간격 반복이 다시 꺼내게 한다
+      weaknesses.forEach(w => {
+        state.skills[w.skillId] = { rating: 1, seen: 0, lastDay: 0 };
+      });
+    } catch (e) {
+      // 오프라인/실패 → 규칙 기반 진단으로 대체 (앱은 계속 동작)
+      const ws = local.findings.map(f => {
+        const l = byId(f.skillId);
+        return { skillId: f.skillId, label: l ? l.skill : f.skillId, quote: "", why: f.why, fix: l ? l.goal : "" };
+      });
+      const m = local.metrics;
+      state.diagnosis = {
+        status: "done", source: e.message === "__offline__" ? "local" : "local-fallback",
+        error: e.message === "__offline__" ? "" : e.message,
+        level: m.chars >= 250 && m.sd > 12 ? "중급" : "초급",
+        levelWhy: `분량 ${m.chars}자, 문장 ${m.sentences}개, 길이 편차 ${m.sd}자를 기준으로 한 개략 판정입니다.`,
+        summary: `문장 ${m.sentences}개, 평균 ${m.mean}자로 썼습니다. 규칙 기반 지표에서 ${ws.length}가지 개선 지점이 보입니다.`,
+        strengths: [{ point: "끝까지 완성", quote: "", why: "분량을 채워 완결한 것 자체가 산출(output) 훈련의 출발입니다." }],
+        weaknesses: ws, advice: "AI 키를 설정하면 글의 내용까지 짚는 구체적 진단을 받을 수 있어요. 지금은 표면 지표 기준 커리큘럼으로 시작합니다.",
+        date: todayStr()
+      };
+      state.plan = buildPlanFromFocus(ws.filter(w => byId(w.skillId).track === "write").map(w => w.skillId),
+                                      ws.filter(w => byId(w.skillId).track === "speak").map(w => w.skillId));
+      ws.forEach(w => { state.skills[w.skillId] = { rating: 1, seen: 0, lastDay: 0 }; });
+    }
+    _diagRunning = false;
+    save();
+    renderToday();
+    renderProgress();
+  }
+
+  function viewDiagnosisReport() {
+    const d = state.diagnosis;
+    if (!d || d.status !== "done") return "";
+    const st = (d.strengths || []).map(s => `
+      <div class="fb-block fb-praise">
+        <span class="fb-h">👏 ${esc(s.point || "강점")}</span>
+        ${s.quote ? `<div class="quote-line">“${esc(s.quote)}”</div>` : ""}
+        ${esc(s.why || "")}
+      </div>`).join("");
+    const wk = (d.weaknesses || []).map((w, i) => `
+      <div class="fb-block fb-improve">
+        <span class="fb-h">🎯 개선 ${i + 1} · ${esc(w.label || "")}</span>
+        ${w.quote ? `<div class="quote-line">“${esc(w.quote)}”</div>` : ""}
+        ${esc(w.why || "")}
+        ${w.fix ? `<div class="fix-line">→ ${esc(w.fix)}</div>` : ""}
+      </div>`).join("");
+    const planRows = [];
+    for (let day = 2; day <= 8; day++) {
+      const t = trackForDay(day);
+      if (t === "review") { planRows.push(`<li><b>Day ${day}</b> · 🔁 복습·통합</li>`); continue; }
+      const sid = state.plan[String(day)];
+      const l = sid ? byId(sid) : null;
+      const icon = t === "speak" ? "🎙️" : "✍️";
+      planRows.push(`<li><b>Day ${day}</b> · ${icon} ${l ? esc(l.skill) : (t === "speak" ? "말하기" : "글쓰기")}</li>`);
+    }
+    const badge = d.source === "ai"
+      ? `<span class="src-badge ai">AI 진단</span>`
+      : `<span class="src-badge local">규칙 기반 진단</span>`;
+    return `
+      <div class="card">
+        <h2>🔍 진단 결과 ${badge}</h2>
+        ${d.level ? `<div class="level-row"><span class="level-pill">${esc(d.level)}</span><span class="muted small">${esc(d.levelWhy || "")}</span></div>` : ""}
+        <p class="why-text" style="margin-top:10px">${esc(d.summary || "")}</p>
+        ${st}${wk}
+        ${d.advice ? `<div class="fb-block" style="background:#f6f7fe;border:1px solid var(--line)">
+          <span class="fb-h" style="color:var(--primary)">🧭 첫 주 조언</span>${esc(d.advice)}</div>` : ""}
+        ${d.error ? `<p class="muted" style="font-size:12px">AI 진단 실패(${esc(d.error)}) — 규칙 기반으로 진행했습니다. 설정에서 키를 확인해보세요.</p>` : ""}
+      </div>
+      <div class="card">
+        <h2>🗺️ 나에게 맞춘 첫 주 커리큘럼</h2>
+        <p class="muted small">진단에서 나온 약점을 앞쪽에 배치했어요. 진행하면서 자동으로 조정됩니다.</p>
+        <ul class="plan-list">${planRows.join("")}</ul>
+      </div>`;
   }
 
   /* ---- 세션 시작 화면 ---- */
@@ -322,21 +577,24 @@
     const trackName = { write: "글쓰기", speak: "말하기", review: "복습·통합" }[track] || "";
     const recall = lastLearnedLine();
     const doneToday = state.activity[todayStr()] ? true : false;
-    // 첫 주 커리큘럼 미리보기 (진단 직후)
+    // 진단 직후에는 진단 결과 + 맞춤 커리큘럼을 보여준다
     let preview = "";
     if (state.currentDay === 1) {
-      const plan = [];
-      for (let d = 2; d <= 8; d++) {
-        const t = trackForDay(d);
-        const nm = { write: "✍️ 글쓰기", speak: "🎙️ 말하기", review: "🔁 복습·통합" }[t];
-        plan.push(`<li><b>Day ${d}</b> · ${nm}</li>`);
+      preview = viewDiagnosisReport();
+      if (!preview) {
+        const plan = [];
+        for (let d = 2; d <= 8; d++) {
+          const t = trackForDay(d);
+          const nm = { write: "✍️ 글쓰기", speak: "🎙️ 말하기", review: "🔁 복습·통합" }[t];
+          plan.push(`<li><b>Day ${d}</b> · ${nm}</li>`);
+        }
+        preview = `
+        <div class="card">
+          <h2>🗺️ 제안하는 첫 주 커리큘럼</h2>
+          <p class="muted small">쓰기 4일 · 말하기 2일 · 복습 1일의 리듬으로 순환합니다.</p>
+          <ul class="plan-list">${plan.join("")}</ul>
+        </div>`;
       }
-      preview = `
-      <div class="card">
-        <h2>🗺️ 제안하는 첫 주 커리큘럼</h2>
-        <p class="muted small">쓰기 4일 · 말하기 2일 · 복습 1일의 리듬으로 순환합니다. 진행하며 당신의 약점에 맞게 자동 조정돼요.</p>
-        <ul style="margin:8px 0 0; padding-left:18px; font-size:14px; line-height:1.9">${plan.join("")}</ul>
-      </div>`;
     }
     return `
     <div class="session-step">
@@ -526,14 +784,28 @@
     });
   }
 
+  /* AI 피드백 슬롯 — 절약 모드면 버튼을 눌러야 호출된다 */
+  function aiSlotHTML(slotId, askId, cached) {
+    if (cached || !state.settings.aiSaver) {
+      return `<div id="${slotId}" class="ai-fb-wrap">${cached ? "" : `<span class="spinner"></span>AI 코치가 분석하고 있어요…`}</div>`;
+    }
+    return `
+      <div class="ai-ask-box">
+        <div class="ai-ask-text">🤖 <b>AI 코치 피드백</b>을 받아볼까요?
+          <span class="muted" style="font-size:12px">호출 1회 · 오늘 ${todayAIUsage()}회 사용</span></div>
+        <button class="btn btn-secondary small" id="${askId}" style="margin:0">피드백 받기</button>
+      </div>
+      <div id="${slotId}" class="ai-fb-wrap"></div>`;
+  }
+  function aiOffHint() {
+    return `<p class="muted small">💡 설정에서 <b>무료 Gemini 키</b>를 넣으면 이 글에 대한 이론 기반 맞춤 피드백을 받을 수 있어요.</p>`;
+  }
+
   /* ---- feedback ---- */
   function viewFeedback(sess, L) {
     const useAI = aiReady();
     const observation = localObservation(L, sess.submission);
-    const aiSlot = useAI
-      ? `<div class="fb-block fb-improve"><span class="fb-h">🤖 AI 코치 피드백</span>
-           <div id="ai-fb"><span class="spinner"></span>피드백을 준비하고 있어요…</div></div>`
-      : "";
+    const aiSlot = useAI ? aiSlotHTML("ai-fb", "ai-ask", !!sess.aiFeedback) : aiOffHint();
     return `
     <div class="session-step">
       <span class="step-kicker ${L.track}">DAY ${sess.day} · 피드백</span>
@@ -544,15 +816,17 @@
         ${sess.noticed ? "게다가 스스로 문제를 짚어낸 점이 특히 좋습니다 — 그게 성장의 핵심이에요." : "완성 자체가 산출(output) 훈련이에요."}
       </div>
 
-      <div class="fb-block fb-improve">
-        <span class="fb-h">🎯 오늘 기술 관점의 관찰</span>
+      <div class="fb-block fb-now">
+        <span class="fb-h">📊 텍스트 분석 (기기에서 계산)</span>
         ${observation}
       </div>
 
-      <div class="section-label">개선 방향 (최대 2가지)</div>
-      ${(L.hints || []).slice(0, 2).map(h => `<div class="notice-q">→ ${esc(h)}</div>`).join("")}
-
       ${aiSlot}
+
+      <details class="hint-fold">
+        <summary>코치 기본 힌트 보기</summary>
+        ${(L.hints || []).slice(0, 2).map(h => `<div class="notice-q">→ ${esc(h)}</div>`).join("")}
+      </details>
 
       <div class="fb-block" style="background:#f6f7fe;border:1px solid var(--line)">
         <span class="fb-h" style="color:var(--primary)">✏️ 다음 재도전</span>
@@ -567,8 +841,12 @@
     $("#to-retry").addEventListener("click", () => { sess.stage = "retry"; save(); renderToday(); });
     $("#skip-retry").addEventListener("click", () => { sess.stage = "wrap"; save(); renderToday(); });
     if (aiReady()) {
-      if (sess.aiFeedback) { const el = $("#ai-fb"); if (el) el.innerHTML = esc(sess.aiFeedback); }
-      else requestAIFeedback(sess, L, sess.submission, "first");
+      const el = $("#ai-fb");
+      if (sess.aiFeedback) { if (el) el.innerHTML = renderAIFeedback(sess.aiFeedback); }
+      else if (state.settings.aiSaver) {
+        const ask = $("#ai-ask");
+        if (ask) ask.addEventListener("click", () => requestAIFeedback(sess, L, sess.submission, "first"));
+      } else requestAIFeedback(sess, L, sess.submission, "first");
     }
   }
 
@@ -831,6 +1109,8 @@
     $("#set-provider").value = uiProvider;
     refreshProviderUI();
     $("#set-ai-enabled").checked = !!state.settings.aiEnabled;
+    $("#set-ai-saver").checked = !!state.settings.aiSaver;
+    $("#ai-usage-count").textContent = todayAIUsage();
   }
   function wireSettingsOnce() {
     $("#set-provider").addEventListener("change", () => {
@@ -842,6 +1122,7 @@
       persistForm(uiProvider);
       state.settings.provider = uiProvider;
       state.settings.aiEnabled = $("#set-ai-enabled").checked;
+      state.settings.aiSaver = $("#set-ai-saver").checked;
       save();
       setStatus("#ai-status", "저장했어요.", "ok");
     });
@@ -866,27 +1147,103 @@
   }
 
   /* ============================ AI 피드백 ============================ */
-  const SYSTEM_PROMPT = `당신은 글쓰기·말하기 전담 코치입니다. 언어학·교육심리학·수사학 이론에 근거해 피드백합니다.
-반드시 지킬 규칙:
-1) 형성평가 3요소로 답합니다 — ① 목표(Feed Up) ② 지금 어디에 있는지(Feed Back) ③ 다음에 무엇을 할지(Feed Forward).
-2) 오늘의 목표 기술 한 가지에만 집중하고 다른 문제는 언급하지 않습니다(인지부하 관리).
-3) 잘한 점 1가지를 '어느 문장이 왜 좋은지' 구체적으로 짚습니다. 칭찬은 노력·전략에 대해서만.
-4) 개선점은 최대 2가지만.
-5) 학습자의 문장 1~2개를 골라 '개선 전 → 개선 후'로 대비해 보여줍니다.
-6) 단, 바로 고쳐주기 전에 "이 문장에서 뭐가 어색한지 찾아보세요"처럼 스스로 알아차리게 하는 질문을 먼저 던집니다(주목 가설).
-7) 글을 통째로 대신 고쳐 쓰지 않습니다. 학습자가 고치게 만듭니다.
-한국어로, 따뜻하지만 공허하지 않게, 400자 내외로 답하세요.`;
+  const SYSTEM_PROMPT = `당신은 한국어 글쓰기·말하기 전담 코치입니다. 언어학·교육심리학·수사학의 검증된 이론에
+근거해 피드백합니다. 형식적인 덕담이 아니라, 학습자가 다음 문장을 실제로 다르게 쓰게 만드는 피드백을 씁니다.
+
+## 피드백 설계 원리
+- 형성평가(Hattie & Timperley): 반드시 세 질문에 답한다 — 목표는 무엇인가(Feed Up) /
+  지금 어디에 있는가(Feed Back) / 다음에 무엇을 할 것인가(Feed Forward).
+- 인지부하 관리(Sweller): 오늘의 목표 기술 하나에만 집중한다. 다른 결점은 보여도 언급하지 않는다.
+- 주목 가설(Schmidt): 답을 바로 주기 전에, 학습자가 스스로 차이를 알아차리게 하는 질문을 먼저 던진다.
+- 성장 마인드셋(Dweck): 칭찬은 재능이 아니라 학습자가 실제로 취한 전략과 노력에 대해서만 한다.
+- ZPD(Vygotsky): 지금 혼자 된 것과, 조금만 도우면 될 것을 구분해서 다음 과제를 지정한다.
+
+## 반드시 지킬 것
+- 학습자 글의 실제 표현을 그대로 인용해 근거로 삼는다. 일반론("문장을 다듬으세요")은 금지.
+- 개선점은 최대 2가지. 각 개선점에는 왜 문제인지의 언어학적 이유를 한 줄 붙인다.
+- 문장 수술은 학습자의 문장을 골라 '전 → 후'로 보여주되, 글 전체를 대신 고쳐 쓰지는 않는다.
+- 진단 근거 없는 칭찬, 인사말, 사족 금지.
+
+## 출력 형식 (아래 라벨을 그대로 쓰고, 각 항목은 1~3문장)
+[목표]
+오늘 이 과제로 도달하려는 상태를 한 문장으로.
+[현재]
+학습자의 글이 지금 어디에 있는지. 반드시 실제 인용을 근거로.
+[잘한 점]
+전략·노력에 대한 구체적 칭찬. 어느 표현이 왜 효과적인지.
+[개선 1]
+문제 → 왜 문제인지(이론·독자 반응) → 어떻게 고칠지.
+[개선 2]
+(있으면. 없으면 이 항목 생략)
+[문장 수술]
+전) 학습자의 원문 한 문장
+후) 고친 예 한 문장
+왜) 무엇이 달라졌는지 한 줄
+[스스로 찾기]
+학습자가 직접 알아차리도록 던지는 질문 1~2개.
+[다음 단계]
+당장 실행할 구체적 행동 하나. (예: "재도전에서 3번째 문장만 20자 이내로 줄여보세요")
+
+한국어. 전체 700~900자. 따뜻하지만 정확하게.`;
 
   function buildUserMessage(L, text, phase) {
-    return `[오늘의 목표 기술] ${L.skill}
+    const m = metrics(text);
+    return `[오늘의 목표 기술] ${L.skill} (${L.category})
 [목표] ${L.goal}
+[이 기술의 이론적 근거] ${L.why}
 [과제] ${L.task}
 [제약] ${(L.constraints || []).join(" / ")}
-${phase === "retry" ? "[이것은 재도전 제출입니다. 개선 여부를 짚어주세요.]\n" : ""}
+[코치가 준 개선 힌트] ${(L.hints || []).join(" / ")}
+${phase === "retry" ? "[이것은 재도전 제출입니다. 이전보다 나아진 지점을 먼저 확인하고, 남은 한 가지만 짚어주세요.]\n" : ""}
+[기계 분석 참고치 — 그대로 나열하지 말고 판단 근거로만]
+글자 ${m.chars} / 문장 ${m.sentences} / 평균 ${m.mean}자(편차 ${m.sd}) / 길이 ${m.lens.join(",")}
+군더더기후보 ${m.fillers} / 완충표현 ${m.hedges} / 피동 ${m.passives} / 접속사 ${m.connectors}
+이어붙임 ${m.conjTails} / 감정어 ${m.emotionWords} / 감각어 ${m.senses} / 동일종결어미연속 ${m.sameEnding}
+
 [학습자 제출]
 ${text}
 
-위 제출에 대해 규칙에 따라 피드백해 주세요. 오늘 기술(${L.skill})에만 집중하세요.`;
+오늘 기술(${L.skill})에만 집중해, 지정된 출력 형식으로 피드백하세요.`;
+  }
+
+  /* 라벨 구획을 파싱해 카드로 렌더 (모델이 형식을 안 지켜도 원문 그대로 표시) */
+  const FB_STYLE = {
+    "목표": ["fb-goal", "🎯 목표"],
+    "현재": ["fb-now", "📍 지금 어디에"],
+    "잘한 점": ["fb-praise", "👏 잘한 점"],
+    "개선 1": ["fb-improve", "🔧 개선 1"],
+    "개선 2": ["fb-improve", "🔧 개선 2"],
+    "문장 수술": ["fb-surgery", "✂️ 문장 수술"],
+    "스스로 찾기": ["fb-notice", "🔎 스스로 찾기"],
+    "다음 단계": ["fb-next", "➡️ 다음 단계"]
+  };
+  function renderAIFeedback(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return "";
+    const re = /\[([^\]\n]{1,12})\]\s*([\s\S]*?)(?=\n\s*\[[^\]\n]{1,12}\]|$)/g;
+    let out = "", found = false, mm;
+    while ((mm = re.exec(text)) !== null) {
+      const label = mm[1].trim(), body = mm[2].trim();
+      if (!body) continue;
+      const sty = FB_STYLE[label];
+      if (!sty) continue;
+      found = true;
+      const inner = label === "문장 수술" ? renderSurgery(body) : esc(body).replace(/\n/g, "<br>");
+      out += `<div class="fb-block ${sty[0]}"><span class="fb-h">${sty[1]}</span>${inner}</div>`;
+    }
+    return found ? out : `<div class="ai-answer">${esc(text)}</div>`;
+  }
+  function renderSurgery(body) {
+    const lines = body.split("\n").map(s => s.trim()).filter(Boolean);
+    let html = "";
+    lines.forEach(line => {
+      const m1 = line.match(/^전\)\s*(.*)$/), m2 = line.match(/^후\)\s*(.*)$/), m3 = line.match(/^왜\)\s*(.*)$/);
+      if (m1) html += `<div class="sg before"><span class="sg-tag">전</span>${esc(m1[1])}</div>`;
+      else if (m2) html += `<div class="sg after"><span class="sg-tag">후</span>${esc(m2[1])}</div>`;
+      else if (m3) html += `<div class="sg why">→ ${esc(m3[1])}</div>`;
+      else html += `<div class="sg why">${esc(line)}</div>`;
+    });
+    return html;
   }
 
   /* ---- 제공자 공통 헬퍼 ---- */
@@ -913,13 +1270,25 @@ ${text}
   function currentModel() { return aiCfg().model; }
   function aiReady() { return !!(state.settings.aiEnabled && currentKey()); }
 
-  function callAI(system, userMsg) {
-    return state.settings.provider === "anthropic"
-      ? callAnthropic(system, userMsg)
-      : callGemini(system, userMsg);
+  /* AI 호출 1회 = 1건으로 집계 (오늘 몇 번 썼는지 설정에서 확인 가능) */
+  function countAIUsage() {
+    const t = todayStr();
+    if (state.aiUsage.date !== t) state.aiUsage = { date: t, count: 0 };
+    state.aiUsage.count += 1;
+    save();
+  }
+  function todayAIUsage() {
+    return state.aiUsage.date === todayStr() ? state.aiUsage.count : 0;
   }
 
-  async function callGemini(system, userMsg) {
+  function callAI(system, userMsg, maxTokens) {
+    countAIUsage();
+    return state.settings.provider === "anthropic"
+      ? callAnthropic(system, userMsg, maxTokens)
+      : callGemini(system, userMsg, maxTokens);
+  }
+
+  async function callGemini(system, userMsg, maxTokens) {
     const model = currentModel() || "gemini-2.5-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(currentKey())}`;
     const res = await fetch(url, {
@@ -928,7 +1297,7 @@ ${text}
       body: JSON.stringify({
         system_instruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: userMsg }] }],
-        generationConfig: { maxOutputTokens: 1024, temperature: 0.7 }
+        generationConfig: { maxOutputTokens: maxTokens || 1600, temperature: 0.7 }
       })
     });
     if (!res.ok) {
@@ -942,7 +1311,7 @@ ${text}
     return text;
   }
 
-  async function callAnthropic(system, userMsg) {
+  async function callAnthropic(system, userMsg, maxTokens) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -953,7 +1322,7 @@ ${text}
       },
       body: JSON.stringify({
         model: currentModel() || "claude-sonnet-5",
-        max_tokens: 1024,
+        max_tokens: maxTokens || 1600,
         system: system,
         messages: [{ role: "user", content: userMsg }]
       })
@@ -968,16 +1337,17 @@ ${text}
 
   async function requestAIFeedback(sess, L, text, phase) {
     const slot = phase === "retry" ? $("#ai-retry-slot") : $("#ai-fb");
+    if (slot) slot.innerHTML = `<span class="spinner"></span>AI 코치가 분석하고 있어요…`;
     try {
       const out = await callAI(SYSTEM_PROMPT, buildUserMessage(L, text, phase));
       if (phase === "retry") sess.aiRetryFeedback = out; else sess.aiFeedback = out;
       save();
-      if (slot) {
-        if (phase === "retry") slot.innerHTML = `<div class="fb-block fb-improve"><span class="fb-h">🤖 재도전 피드백</span><div class="ai-answer">${esc(out)}</div></div>`;
-        else slot.innerHTML = esc(out);
-      }
+      if (slot) slot.innerHTML = renderAIFeedback(out);
     } catch (e) {
-      if (slot) slot.innerHTML = `<span style="color:var(--danger)">AI 피드백 실패: ${esc(e.message)}. 설정에서 키/모델을 확인하세요. (아래 오프라인 피드백은 그대로 유효합니다.)</span>`;
+      if (slot) slot.innerHTML = `<span style="color:var(--danger)">AI 피드백 실패: ${esc(e.message)}. 설정에서 키/모델을 확인하세요. (위 오프라인 관찰은 그대로 유효합니다.)</span>
+        <button class="btn ghost small" id="ai-retry-btn">다시 시도</button>`;
+      const rb = $("#ai-retry-btn");
+      if (rb) rb.addEventListener("click", () => requestAIFeedback(sess, L, text, phase));
     }
   }
 
@@ -1119,7 +1489,7 @@ ${text}
           ${s.type === "talk" ? (m.chars < 60 ? " 발표치고 조금 짧아요 — 근거·예시를 한 겹 더 얹어보세요." : " 발표 분량으로 적절해요.") : (m.chars > 180 ? " 대화 반응치고 길어요 — 핵심만 남겨 더 간결하게." : " 대화 반응으로 적절한 길이예요.")}
         </div>
 
-        ${useAI ? `<div class="fb-block fb-improve"><span class="fb-h">🤖 AI 코치 피드백</span><div id="prac-ai"><span class="spinner"></span>피드백을 준비하고 있어요…</div></div>` : `<p class="muted small">💡 설정에서 API 키를 넣으면 이 답변에 대한 맞춤 AI 피드백을 받을 수 있어요.</p>`}
+        ${useAI ? aiSlotHTML("prac-ai", "prac-ask", !!ap.aiFeedback) : aiOffHint()}
 
         <button class="btn primary" id="prac-retry">다시 말해보기</button>
         <button class="btn ghost small" id="prac-save">저장하고 목록으로</button>
@@ -1138,8 +1508,12 @@ ${text}
     $("#prac-retry").addEventListener("click", () => { ap.stage = "write"; ap.aiFeedback = ""; save(); renderPractice(); window.scrollTo(0, 0); });
     $("#prac-save").addEventListener("click", () => { savePractice(ap, s); state.activePractice = null; save(); renderPractice(); switchTab("tab-practice"); });
     if (aiReady()) {
-      if (ap.aiFeedback) { const el = $("#prac-ai"); if (el) el.innerHTML = esc(ap.aiFeedback); }
-      else requestPracticeAI(ap, s);
+      const el = $("#prac-ai");
+      if (ap.aiFeedback) { if (el) el.innerHTML = renderAIFeedback(ap.aiFeedback); }
+      else if (state.settings.aiSaver) {
+        const ask = $("#prac-ask");
+        if (ask) ask.addEventListener("click", () => requestPracticeAI(ap, s));
+      } else requestPracticeAI(ap, s);
     }
   }
   function savePractice(ap, s) {
@@ -1195,33 +1569,71 @@ ${text}
       if (_ptState) { const d = $("#ptm-display"); if (d) { d.textContent = fmt(_ptState.prep || _ptState.speak); d.className = "timer-display prep"; } const p = $("#ptm-phase"); if (p) p.textContent = "준비 시간"; } }
   }
 
-  const PRACTICE_SYSTEM = `당신은 한국인의 실전 말하기·대화를 돕는 스피치 코치입니다.
-학습자가 특정 상황(회식·발표·면접·경조사·일상 대화 등)에서 실제로 한 말을 보고 피드백합니다.
-규칙:
-1) 잘한 점 1가지를 구체적으로 짚습니다(어느 표현이 왜 효과적인지).
-2) 이 상황에서 더 나아질 점 최대 2가지만. 상황의 핵심 포인트에 집중합니다.
-3) 학습자의 말 일부를 골라 '이렇게 바꾸면 더 좋다'를 개선 전→후로 보여줍니다.
-4) 한국의 실제 상황 맥락(예의·관계·분위기)을 고려합니다.
-5) 통째로 대신 말해주지 말고, 학습자가 고치도록 이끕니다.
-따뜻하지만 솔직하게, 한국어로 350자 내외로 답하세요.`;
+  const PRACTICE_SYSTEM = `당신은 한국인의 실전 말하기·대화를 돕는 스피치 코치입니다. 수사학과 화용론(pragmatics),
+그리고 한국어의 공손 전략(존대·체면 유지)에 근거해 피드백합니다.
+
+## 판단 기준
+- 화용론적 적절성: 이 상황·상대·자리에서 그 말이 실제로 통하는가.
+- 공손 전략(Brown & Levinson): 상대의 체면을 지키면서 내 뜻을 전달했는가. 과잉 완충으로 요점이
+  사라지지도, 직설로 무례해지지도 않았는가.
+- 구조(수사학): 발표라면 핵심 선행(PREP 등) · 근거 · 마무리가 있는가. 대화라면 상대의 말을 받고
+  내 뜻을 얹었는가.
+- 청자 반응 예측: 이 말을 들은 상대가 어떻게 느끼고 무엇을 할지.
+- 형성평가(Hattie & Timperley): 목표 / 현재 / 다음 단계가 모두 드러나야 한다.
+
+## 반드시 지킬 것
+- 학습자가 실제로 한 말을 그대로 인용해 근거로 삼는다. 일반론 금지.
+- 개선점은 최대 2가지. 각각 "그 말을 들은 상대가 어떻게 느낄지"를 한 줄로 붙인다.
+- 통째로 대신 말해주지 않는다. 한 대목만 '전 → 후'로 시연한다.
+- 상황에 맞는 한국어 말투(존댓말 수준, 자리의 분위기)를 고려한다.
+
+## 출력 형식 (라벨 그대로, 각 항목 1~3문장)
+[목표]
+이 상황에서 좋은 말하기가 무엇인지 한 문장.
+[현재]
+학습자의 말이 지금 어떤 인상을 주는지. 실제 인용 근거로.
+[잘한 점]
+어느 표현이 왜 효과적이었는지 구체적으로.
+[개선 1]
+문제 → 상대가 받는 느낌 → 어떻게 바꿀지.
+[개선 2]
+(있으면. 없으면 생략)
+[문장 수술]
+전) 학습자가 한 말 한 대목
+후) 고친 예
+왜) 무엇이 달라졌는지
+[스스로 찾기]
+스스로 알아차리게 하는 질문 1~2개.
+[다음 단계]
+다시 말할 때 딱 하나 바꿀 것.
+
+한국어. 전체 600~800자.`;
 
   async function requestPracticeAI(ap, s) {
     const slot = $("#prac-ai");
-    const msg = `[상황] ${s.scene}
+    if (slot) slot.innerHTML = `<span class="spinner"></span>AI 코치가 분석하고 있어요…`;
+    const cat = PRACTICE_CATS.find(c => c.key === s.cat);
+    const msg = `[상황 분류] ${cat ? cat.label : s.cat}
+[상황] ${s.scene}
 [미션] ${s.mission}
+[유형] ${s.type === "talk" ? "발표/스피치 (혼자 길게 말함)" : "대화 반응 (상대에게 짧게 대응)"}
 [이 상황의 핵심 포인트] ${(s.tips || []).join(" / ")}
-[유형] ${s.type === "talk" ? "발표/스피치" : "대화 반응"}
+[모범 답변 예시 — 참고용, 이대로 강요하지 말 것] ${s.good}
+[이 상황의 흔한 실수] ${s.pitfall}
 
 [학습자가 실제로 한 말]
 ${ap.response}
 
-위 상황에 맞게 규칙대로 피드백해 주세요.`;
+이 상황의 핵심 포인트를 기준으로, 지정된 출력 형식으로 피드백하세요.`;
     try {
       const out = await callAI(PRACTICE_SYSTEM, msg);
       ap.aiFeedback = out; save();
-      if (slot) slot.innerHTML = esc(out);
+      if (slot) slot.innerHTML = renderAIFeedback(out);
     } catch (e) {
-      if (slot) slot.innerHTML = `<span style="color:var(--danger)">AI 피드백 실패: ${esc(e.message)}. 설정에서 키/모델을 확인하세요.</span>`;
+      if (slot) slot.innerHTML = `<span style="color:var(--danger)">AI 피드백 실패: ${esc(e.message)}. 설정에서 키/모델을 확인하세요.</span>
+        <button class="btn ghost small" id="prac-ai-retry">다시 시도</button>`;
+      const rb = $("#prac-ai-retry");
+      if (rb) rb.addEventListener("click", () => requestPracticeAI(ap, s));
     }
   }
 
@@ -1268,6 +1680,7 @@ ${ap.response}
   /* ============================ 초기화 ============================ */
   function init() {
     $$(".nav-btn").forEach(b => b.addEventListener("click", () => switchTab(b.getAttribute("data-tab"))));
+    save();   // 구버전 설정 이관 결과를 즉시 영구 저장
     wireSettingsOnce();
     setupInstall();
     renderAll();

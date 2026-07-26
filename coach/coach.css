@@ -218,6 +218,56 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
 .nav-btn .nav-icon{font-size:20px}
 .nav-btn.active{color:var(--primary)}
 
+/* ---------- 업그레이드된 AI 피드백 블록 ---------- */
+.fb-goal{background:var(--primary-soft); border:1px solid #d6d3f7}
+.fb-goal .fb-h{color:var(--primary)}
+.fb-now{background:#f4f6fb; border:1px solid var(--line)}
+.fb-now .fb-h{color:#4a5170}
+.fb-surgery{background:#fffaf0; border:1px solid #ffe4b5}
+.fb-surgery .fb-h{color:var(--warn)}
+.fb-notice{background:#eef0fd; border:1px dashed #c3c0f0}
+.fb-notice .fb-h{color:#2f2b6b}
+.fb-next{background:#e8f7f5; border:1px solid #bfe8e2}
+.fb-next .fb-h{color:#0e7c73}
+.ai-fb-wrap{display:grid; gap:0}
+.ai-fb-wrap .fb-block:first-child{margin-top:0}
+
+.sg{font-size:14px; padding:8px 11px; border-radius:9px; margin-top:6px; line-height:1.55}
+.sg-tag{display:inline-block; font-size:10.5px; font-weight:800; padding:1px 7px; border-radius:999px;
+  margin-right:7px; vertical-align:1px}
+.sg.before{background:#fdf0ee; color:#7a3b32} .sg.before .sg-tag{background:#e7bdb4; color:#6b2f26}
+.sg.after{background:#eaf7ef; color:#245c39} .sg.after .sg-tag{background:#a9dcbd; color:#1b5130}
+.sg.why{background:transparent; color:var(--muted); font-size:13px; padding:4px 2px}
+
+/* ---------- 진단 리포트 ---------- */
+.src-badge{font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:999px; margin-left:6px;
+  vertical-align:2px}
+.src-badge.ai{background:#e8f7f5; color:#0e7c73}
+.src-badge.local{background:#f0f1f9; color:var(--muted)}
+.level-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:4px}
+.level-pill{background:var(--primary); color:#fff; font-weight:800; font-size:13px;
+  padding:4px 14px; border-radius:999px; flex:0 0 auto}
+.quote-line{border-left:3px solid rgba(0,0,0,.12); padding:4px 0 4px 10px; margin:6px 0;
+  font-size:13.5px; color:#4a4d66; font-style:italic}
+.fix-line{margin-top:7px; font-size:13.5px; font-weight:700; color:#8a5a12}
+.plan-list{margin:10px 0 0; padding:0; list-style:none}
+.plan-list li{font-size:14px; padding:9px 12px; background:#f8f9fe; border-radius:10px;
+  margin-bottom:6px; border-left:3px solid var(--primary)}
+
+/* ---------- AI 호출 버튼(절약 모드) ---------- */
+.ai-ask-box{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:space-between;
+  background:#f6f7fe; border:1px dashed #c9c9e6; border-radius:12px; padding:12px 14px; margin-top:12px}
+.ai-ask-text{font-size:14px; line-height:1.5}
+.usage-row{font-size:13px; color:var(--muted); margin-top:10px}
+.hint-fold{margin-top:12px; border:1px solid var(--line); border-radius:12px; background:#fff;
+  padding:0 12px}
+.hint-fold summary{cursor:pointer; font-size:13px; font-weight:700; color:var(--muted);
+  padding:11px 0; list-style:none}
+.hint-fold summary::-webkit-details-marker{display:none}
+.hint-fold summary::before{content:"▸ "; color:var(--primary)}
+.hint-fold[open] summary::before{content:"▾ "}
+.hint-fold .notice-q{margin-bottom:10px}
+
 /* ---------- 실전 말하기 ---------- */
 .practice-intro{font-size:13.5px; color:#40435c; margin-bottom:12px}
 .cat-scroll{display:flex; gap:8px; overflow-x:auto; padding:2px 2px 10px; margin:0 -2px;
