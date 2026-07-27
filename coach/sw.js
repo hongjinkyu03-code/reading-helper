@@ -2,7 +2,7 @@
    캐시 전략: "네트워크 우선" — 온라인이면 항상 최신 파일, 오프라인이면 저장본 사용.
    (예전엔 캐시 우선이라, 홈 화면에 설치해 거의 안 닫는 아이폰 앱에서는
    서버에 새 버전을 올려도 화면이 몇 주씩 갱신되지 않는 문제가 있었다.) */
-const CACHE = "coach-v19";
+const CACHE = "coach-v20";
 const ASSETS = [
   "./",
   "./index.html",
@@ -14,6 +14,7 @@ const ASSETS = [
   "./drills.js",
   "./speech.js",
   "./story.js",
+  "./train.js",
   "./manifest.json",
   "./icon-180.png",
   "./icon-192.png",

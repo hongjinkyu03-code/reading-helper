@@ -88,6 +88,7 @@
       preset: "balanced",     // 트랙 프리셋 (balanced|speaking|social|writing)
       drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
       aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
+      train: { daily: null, log: {}, xp: 0, correct: 0, total: 0 },  // 매일 훈련 진행
       settings: {
         aiEnabled: false,
         aiSaver: true,        // 절약 모드: AI 피드백을 탭할 때만 호출
@@ -139,6 +140,11 @@
     if (!s.preset || !TRACK_PRESETS[s.preset]) s.preset = "balanced";
     if (!s.drills) s.drills = { done: [], correct: 0, total: 0 };
     if (!s.aiUsage) s.aiUsage = { date: "", count: 0 };
+    if (!s.train) s.train = { daily: null, log: {}, xp: 0, correct: 0, total: 0 };
+    if (!s.train.log) s.train.log = {};
+    if (typeof s.train.xp !== "number") s.train.xp = 0;
+    if (typeof s.train.correct !== "number") s.train.correct = 0;
+    if (typeof s.train.total !== "number") s.train.total = 0;
     if (!set.provider) set.provider = "gemini";
     if (!set.gemini) set.gemini = { key: "", model: "gemini-2.5-flash" };
     if (!set.anthropic) set.anthropic = { key: set.apiKey || "", model: set.model || "claude-sonnet-5" };
@@ -1700,10 +1706,40 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
         <p class="muted small">${doneToday ? "오늘 이미 한 세션을 마쳤어요. 더 하고 싶다면 이어서 진행해도 좋아요 💪" : "10~20분이면 충분해요. 살짝 버거운 게 정상입니다."}</p>
         <button class="btn primary" id="start-session" style="max-width:280px; margin:16px auto 0">Day ${nextDay} 시작하기</button>
       </div>
+      ${trainCardHTML()}
     </div>`;
+  }
+  /* 오늘 탭에도 훈련 진행률을 띄운다 — 긴 과제가 부담스러운 날에도
+     짧은 훈련은 할 수 있게 해서 연속 기록이 끊기지 않도록 한다. */
+  function trainCardHTML() {
+    const set = trainSet();
+    const done = set.solved.length, total = set.items.length;
+    if (!total) return "";
+    const pct = Math.round(done / total * 100);
+    const finished = done >= total;
+    return `
+      <div class="card" style="padding:16px">
+        <h2 style="margin-bottom:6px">🏋️ 매일 훈련 <span class="sub">5분 · ${TRAIN_SET_SIZE}문항</span></h2>
+        <p class="muted small">${finished
+          ? "오늘 훈련을 다 마쳤어요. 내일 새 세트가 나옵니다 ✅"
+          : "짧은 반복이 실력을 만듭니다. 시간이 없는 날엔 이것만 해도 좋아요."}</p>
+        <div class="daily-bar" style="margin-top:10px">
+          <div class="daily-head"><span>진행 <b>${done}/${total}</b></span>
+            <span class="muted">⚡${state.train.xp || 0} XP</span></div>
+          <div class="daily-track"><span class="daily-fill" style="width:${pct}%"></span></div>
+        </div>
+        <button class="btn ghost small" id="go-train" style="margin-top:12px">
+          ${finished ? "훈련 다시 보기" : "훈련 시작"}</button>
+      </div>`;
   }
   function wireStart() {
     $("#start-session").addEventListener("click", startNextSession);
+    const gt = $("#go-train");
+    if (gt) gt.addEventListener("click", () => {
+      practiceMode = "train";
+      switchTab("tab-practice");
+      window.scrollTo(0, 0);
+    });
   }
 
   /* ---- brief: 목표·미니레슨·과제 ---- */
@@ -3185,6 +3221,7 @@ ${text}
   /* 안목(drills)은 글쓰기 계열, 나머지 셋은 말하기 계열 — 상단 글쓰기·말하기 스위치에 맞춰 걸러낸다.
      '균형' 프리셋일 때만 전부 보여준다. */
   const SEGMENT_DEFS = [
+    { key: "train", label: "🏋️ 훈련", mode: "both" },
     { key: "situations", label: "🎤 상황", mode: "speak" },
     { key: "roleplay", label: "💬 롤플레이", mode: "speak" },
     { key: "study", label: "🔬 썰해부", mode: "speak" },
@@ -3192,13 +3229,16 @@ ${text}
   ];
   function availableSegments() {
     const m = currentMode();
-    return SEGMENT_DEFS.filter(s => m === "both" || s.mode === m);
+    return SEGMENT_DEFS.filter(s => s.mode === "both" || m === "both" || s.mode === m);
   }
   function segmentHTML() {
     const d = state.drills || { total: 0 };
     const rp = (state.roleplayLog || []).length;
     const sd = (state.studyDone || []).length;
+    const tset = trainSet();
+    const tLeft = tset.items.length - tset.solved.length;
     const badge = { situations: "", roleplay: rp ? `<span class="seg-n">${rp}</span>` : "",
+      train: tLeft ? `<span class="seg-n">${tLeft}</span>` : "",
       study: sd ? `<span class="seg-n">${sd}</span>` : "", drills: d.total ? `<span class="seg-n">${d.total}</span>` : "" };
     const segs = availableSegments();
     if (segs.length <= 1) return "";   // 하나뿐이면 고를 게 없으니 전환 UI를 안 보여준다
@@ -3219,7 +3259,10 @@ ${text}
     // 현재 모드에서 안 보이는 세그먼트에 남아 있었으면 이 모드의 첫 번째 세그먼트로 옮긴다
     const segs = availableSegments().map(s => s.key);
     if (!segs.includes(practiceMode)) practiceMode = segs[0] || "situations";
-    if (practiceMode === "study") {
+    if (practiceMode === "train") {
+      root.innerHTML = segmentHTML() + viewTrain();
+      wireSegments(); wireTrain();
+    } else if (practiceMode === "study") {
       root.innerHTML = segmentHTML() + viewStudy();
       wireSegments(); wireStudy();
     } else if (practiceMode === "roleplay") {
@@ -3238,6 +3281,292 @@ ${text}
     $$(".seg").forEach(s => s.addEventListener("click", () => {
       practiceMode = s.getAttribute("data-mode"); renderPractice(); window.scrollTo(0, 0);
     }));
+  }
+
+  /* ==================== 매일 훈련 (API 0원) ====================
+   * 하루 한 편의 긴 과제만으로는 개별 기술을 충분히 반복하지 못한다.
+   * 좁은 기술을 짧게 여러 번 반복하고 즉시 교정하는 층을 따로 둔다.
+   * 틀린 문항은 간격을 두고 다시 나온다(Roediger & Karpicke: 인출 + 분산). */
+  const TRAIN_SET_SIZE = 12;
+  const TRAIN_INTERVALS = [1, 3, 7, 16, 35];   // 연속 정답 횟수별 재출제 간격(일)
+
+  function trainLog(id) {
+    state.train.log = state.train.log || {};
+    return state.train.log[id] || { seen: 0, streak: 0, lastDay: -999 };
+  }
+  /* 이 문항을 오늘 다시 내야 하는가 — 연속 정답이 쌓일수록 간격이 늘어난다 */
+  function trainDue(id) {
+    const lg = trainLog(id);
+    if (!lg.seen) return true;                       // 아직 안 본 문항
+    const gap = TRAIN_INTERVALS[Math.min(lg.streak, TRAIN_INTERVALS.length - 1)];
+    return (dayIndex() - lg.lastDay) >= gap;
+  }
+  function dayIndex() { return Math.floor(Date.now() / 86400000); }
+
+  function trainPool() {
+    const m = currentMode();
+    return TRAIN_ITEMS.filter(it => m === "both" || it.mode === m);
+  }
+  /* 오늘의 세트 — 복습 대상(틀렸던 것) 먼저, 그다음 새 문항.
+     기술이 한쪽으로 쏠리지 않게 같은 기술은 최대 2문항까지만 담는다. */
+  function buildTrainSet() {
+    const pool = trainPool();
+    const due = pool.filter(it => trainDue(it.id));
+    const rank = (it) => {
+      const lg = trainLog(it.id);
+      if (lg.seen && lg.streak === 0) return 0;      // 틀린 적 있음 — 최우선 복습
+      if (!lg.seen) return 1;                        // 새 문항
+      return 2;                                      // 간격 도래한 복습
+    };
+    const seed = hashStr(todayStr());
+    const sorted = due.slice().sort((a, b) => {
+      const r = rank(a) - rank(b);
+      if (r) return r;
+      return (hashStr(a.id + seed) % 1000) - (hashStr(b.id + seed) % 1000);
+    });
+    const out = [], perSkill = {};
+    for (const it of sorted) {
+      if (out.length >= TRAIN_SET_SIZE) break;
+      if ((perSkill[it.skill] || 0) >= 2) continue;
+      perSkill[it.skill] = (perSkill[it.skill] || 0) + 1;
+      out.push(it);
+    }
+    // 간격 제한 때문에 부족하면 나머지로 채운다(연습량이 우선)
+    if (out.length < TRAIN_SET_SIZE) {
+      for (const it of pool) {
+        if (out.length >= TRAIN_SET_SIZE) break;
+        if (out.indexOf(it) < 0) out.push(it);
+      }
+    }
+    return out;
+  }
+  function trainSet() {
+    const t = todayStr();
+    const d = state.train.daily;
+    const byId = {}; TRAIN_ITEMS.forEach(it => { byId[it.id] = it; });
+    if (d && d.date === t && d.ids && d.ids.length) {
+      const items = d.ids.map(id => byId[id]).filter(Boolean);
+      if (items.length) return { items: items, solved: d.solved || [] };
+    }
+    const set = buildTrainSet();
+    state.train.daily = { date: t, ids: set.map(i => i.id), solved: [] };
+    save();
+    return { items: set, solved: [] };
+  }
+
+  /* 채점 — mcq/order는 정오답이 분명하고, rewrite/fill은 규칙 통과 여부로 본다 */
+  function gradeRewrite(item, text) {
+    const t = String(text || "");
+    return item.checks.map(c => {
+      // 원본 정규식에 g 플래그가 있으면 test()가 상태를 갖게 되므로 매번 새로 만든다
+      const re = new RegExp(c.re.source, c.re.flags.replace("g", ""));
+      const hit = re.test(t);
+      return { label: c.label, ok: c.need ? hit : !hit, need: c.need };
+    });
+  }
+  function trainRecord(item, correct) {
+    state.train.log = state.train.log || {};
+    const lg = trainLog(item.id);
+    state.train.log[item.id] = {
+      seen: lg.seen + 1,
+      streak: correct ? lg.streak + 1 : 0,
+      lastDay: dayIndex()
+    };
+    state.train.total = (state.train.total || 0) + 1;
+    if (correct) {
+      state.train.correct = (state.train.correct || 0) + 1;
+      state.train.xp = (state.train.xp || 0) + 10;
+    } else {
+      state.train.xp = (state.train.xp || 0) + 3;   // 틀려도 시도에 보상 — 회피를 막는다
+    }
+    const d = state.train.daily;
+    if (d && d.solved.indexOf(item.id) < 0) d.solved.push(item.id);
+    if (state.trainLastDate !== todayStr()) { state.trainLastDate = todayStr(); recordActivity(); }
+    save();
+  }
+
+  /* 진행 중인 문항의 화면 상태 (저장하지 않음 — 한 문항은 짧게 끝난다) */
+  let trainCur = null;   // { item, picked, order[], text, slots{}, graded, correct }
+  function trainNext() {
+    const set = trainSet();
+    const left = set.items.filter(i => set.solved.indexOf(i.id) < 0);
+    const item = left[0] || null;
+    trainCur = item ? { item: item, picked: null, order: [], text: "", slots: {}, graded: false, correct: false } : null;
+  }
+
+  function viewTrain() {
+    const set = trainSet();
+    const doneN = set.solved.length, totalN = set.items.length;
+    const xp = state.train.xp || 0;
+    const acc = state.train.total ? Math.round(state.train.correct / state.train.total * 100) : 0;
+    const head = `
+      <div class="card" style="padding:14px 16px">
+        <h2 style="margin-bottom:6px">🏋️ 매일 훈련 <span class="sub">하루 ${TRAIN_SET_SIZE}문항 · 5분</span></h2>
+        <p class="practice-intro">긴 과제 하나보다, 좁은 기술을 짧게 여러 번 반복할 때 실력이 빨리 붙습니다.
+        틀린 문항은 며칠 뒤에 다시 나옵니다.
+        <span class="muted" style="font-size:12px">· AI 호출 없음 · ⚡${xp} XP${state.train.total ? ` · 정답률 ${acc}%` : ""}</span></p>
+        <div class="daily-bar">
+          <div class="daily-head">
+            <span>📅 오늘의 훈련 <b>${doneN}/${totalN}</b></span>
+            <span class="muted">${currentMode() === "write" ? "✍️ 글쓰기" : currentMode() === "speak" ? "🎙️ 말하기" : "균형"} 모드</span>
+          </div>
+          <div class="daily-track"><span class="daily-fill" style="width:${totalN ? doneN / totalN * 100 : 0}%"></span></div>
+        </div>
+      </div>`;
+    // 방금 채점한 문항은 해설을 먼저 보여준다. (채점 즉시 solved에 들어가므로
+    // 이 분기가 없으면 정답 해설을 못 보고 다음 문항으로 건너뛴다)
+    if (trainCur && trainCur.graded) return head + viewTrainItem(trainCur);
+    if (doneN >= totalN && totalN > 0) {
+      return head + `
+        <div class="card" style="text-align:center; padding:26px 18px">
+          <div style="font-size:40px">🎉</div>
+          <h2 style="margin:8px 0 4px">오늘의 훈련 완료!</h2>
+          <p class="muted small">${totalN}문항을 모두 풀었어요. 내일 새 세트가 나옵니다.</p>
+          <button class="btn ghost small" id="train-more" style="margin-top:12px">그래도 더 풀기</button>
+        </div>`;
+    }
+    if (!trainCur || set.solved.indexOf(trainCur.item.id) >= 0) trainNext();
+    if (!trainCur) return head + `<div class="card"><p class="empty-msg">훈련할 문항이 없어요.</p></div>`;
+    return head + viewTrainItem(trainCur);
+  }
+
+  function viewTrainItem(cur) {
+    const it = cur.item, sk = TRAIN_SKILLS[it.skill] || { label: it.skill, emoji: "•" };
+    const tag = `<div class="train-tag">${sk.emoji} ${esc(sk.label)}</div>`;
+    const ctx = it.context ? `<div class="train-ctx">${esc(it.context)}</div>` : "";
+    const after = cur.graded ? `
+      <div class="fb-block ${cur.correct ? "fb-praise" : "fb-improve"}">
+        <span class="fb-h">${cur.correct ? "✅ 정확합니다" : "🔍 이렇게 보세요"}</span>${esc(it.why)}</div>
+      ${it.tip ? `<div class="recall-line">📌 ${esc(it.tip)}</div>` : ""}
+      <button class="btn primary" id="train-next">다음 문항</button>` : "";
+
+    if (it.type === "mcq") {
+      const opts = it.options.map((o, i) => {
+        let cls = "";
+        if (cur.graded) cls = i === it.answer ? "correct" : (cur.picked === i ? "wrong" : "dim");
+        else if (cur.picked === i) cls = "picked";
+        return `<button class="train-opt ${cls}" data-i="${i}" ${cur.graded ? "disabled" : ""}>${esc(o)}</button>`;
+      }).join("");
+      return `<div class="card">${tag}${ctx}
+        <div class="train-q">${esc(it.prompt)}</div>
+        <div class="train-opts">${opts}</div>
+        ${!cur.graded ? `<button class="btn primary" id="train-check" ${cur.picked === null ? "disabled" : ""}>확인</button>` : after}
+      </div>`;
+    }
+
+    if (it.type === "order") {
+      const chosen = cur.order.map((li, pos) =>
+        `<div class="train-ord-row"><span class="ord-n">${pos + 1}</span>${esc(it.lines[li])}
+          ${!cur.graded ? `<button class="ord-x" data-pos="${pos}">✕</button>` : ""}</div>`).join("");
+      const rest = it.lines.map((l, i) => cur.order.indexOf(i) >= 0 ? "" :
+        `<button class="train-ord-pick" data-i="${i}">${esc(l)}</button>`).join("");
+      const right = cur.graded ? `<div class="section-label">정답 순서</div>
+        <div class="train-ord-answer">${it.answer.map((li, p) =>
+          `<div class="train-ord-row"><span class="ord-n">${p + 1}</span>${esc(it.lines[li])}</div>`).join("")}</div>` : "";
+      return `<div class="card">${tag}${ctx}
+        <div class="train-q">${esc(it.prompt)}</div>
+        <div class="section-label">순서대로 눌러 배열하세요</div>
+        <div class="train-ord-chosen">${chosen || `<p class="muted small">아래에서 첫 문장을 고르세요.</p>`}</div>
+        <div class="train-ord-rest">${rest}</div>
+        ${right}
+        ${!cur.graded ? `<button class="btn primary" id="train-check" ${cur.order.length !== it.lines.length ? "disabled" : ""}>확인</button>` : after}
+      </div>`;
+    }
+
+    if (it.type === "rewrite") {
+      const marks = cur.graded ? gradeRewrite(it, cur.text) : [];
+      return `<div class="card">${tag}${ctx}
+        <div class="train-q">${esc(it.ask)}</div>
+        <div class="train-before"><span class="tb-h">고칠 문장</span>${esc(it.before)}</div>
+        ${!cur.graded ? `
+          <textarea id="train-text" rows="4" placeholder="직접 고쳐 써보세요.">${esc(cur.text)}</textarea>
+          <button class="btn primary" id="train-check">확인</button>
+        ` : `
+          <div class="train-mine"><span class="tb-h">내가 쓴 것</span>${esc(cur.text)}</div>
+          <div class="check-list">${marks.map(m =>
+            `<div class="check-row ${m.ok ? "ok" : "no"}"><span>${m.ok ? "✓" : "✗"}</span>${esc(m.label)}</div>`).join("")}</div>
+          <div class="train-model"><span class="tb-h">참고 답안</span>${esc(it.model)}</div>
+          ${after}
+        `}
+      </div>`;
+    }
+
+    // fill
+    const slots = it.slots.map(s => {
+      if (cur.graded) {
+        const v = (cur.slots[s.key] || "").trim();
+        const ok = charLen(v) >= (s.min || 5);
+        return `<div class="fill-slot">
+          <div class="fs-label">${esc(s.label)} <span class="${ok ? "sv-ok" : "sv-warn"}">${ok ? "✓" : "너무 짧아요"}</span></div>
+          <div class="fs-mine">${esc(v || "(비어 있음)")}</div>
+          <div class="fs-model">참고: ${esc(it.model[s.key] || "")}</div>
+        </div>`;
+      }
+      return `<div class="fill-slot">
+        <div class="fs-label">${esc(s.label)}</div>
+        ${s.hint ? `<div class="fs-hint">${esc(s.hint)}</div>` : ""}
+        <textarea class="fill-in" data-k="${s.key}" rows="2" placeholder="${esc(s.hint || "")}">${esc(cur.slots[s.key] || "")}</textarea>
+      </div>`;
+    }).join("");
+    return `<div class="card">${tag}
+      <div class="train-q">${esc(it.topic)}</div>
+      ${slots}
+      ${!cur.graded ? `<button class="btn primary" id="train-check">확인</button>` : after}
+    </div>`;
+  }
+
+  function wireTrain() {
+    const more = $("#train-more");
+    if (more) more.addEventListener("click", () => {
+      // 오늘 세트를 다 풀었어도 더 하고 싶으면 새 세트를 뽑아준다
+      state.train.daily = null; save(); trainCur = null; renderPractice(); window.scrollTo(0, 0);
+    });
+    if (!trainCur) return;
+    const cur = trainCur, it = cur.item;
+
+    $$(".train-opt").forEach(b => b.addEventListener("click", () => {
+      if (cur.graded) return;
+      cur.picked = parseInt(b.getAttribute("data-i"), 10);
+      renderPractice();
+    }));
+    $$(".train-ord-pick").forEach(b => b.addEventListener("click", () => {
+      if (cur.graded) return;
+      cur.order.push(parseInt(b.getAttribute("data-i"), 10));
+      renderPractice();
+    }));
+    $$(".ord-x").forEach(b => b.addEventListener("click", () => {
+      if (cur.graded) return;
+      cur.order.splice(parseInt(b.getAttribute("data-pos"), 10), 1);
+      renderPractice();
+    }));
+    const ta = $("#train-text");
+    if (ta) ta.addEventListener("input", () => { cur.text = ta.value; });
+    $$(".fill-in").forEach(t => t.addEventListener("input", () => {
+      cur.slots[t.getAttribute("data-k")] = t.value;
+    }));
+
+    const chk = $("#train-check");
+    if (chk) chk.addEventListener("click", () => {
+      if (it.type === "mcq") {
+        if (cur.picked === null) return;
+        cur.correct = cur.picked === it.answer;
+      } else if (it.type === "order") {
+        if (cur.order.length !== it.lines.length) return;
+        cur.correct = cur.order.join(",") === it.answer.join(",");
+      } else if (it.type === "rewrite") {
+        if (charLen(cur.text) < 5) { alert("조금 더 써보세요."); return; }
+        cur.correct = gradeRewrite(it, cur.text).every(m => m.ok);
+      } else {
+        const short = it.slots.filter(s => charLen((cur.slots[s.key] || "").trim()) < (s.min || 5));
+        if (short.length) { alert(`아직 덜 채운 칸이 있어요: ${short.map(s => s.label).join(", ")}`); return; }
+        cur.correct = true;   // 틀 채우기는 정오답이 아니라 '해봤는가'가 핵심
+      }
+      cur.graded = true;
+      trainRecord(it, cur.correct);
+      renderPractice();
+    });
+    const nx = $("#train-next");
+    if (nx) nx.addEventListener("click", () => { trainNext(); renderPractice(); window.scrollTo(0, 0); });
   }
 
   /* ==================== 썰 해부 (API 0원) ====================
