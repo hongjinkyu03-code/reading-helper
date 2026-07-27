@@ -738,7 +738,7 @@ ${SPEECH_THEORY}
 }
 점수는 후하게 주지 마세요. 3이 보통입니다. fixes는 1~2개.`;
 
-  function speechUserMessage(L, transcript, take, prevNote) {
+  function speechUserMessage(L, transcript, take, prevNote, voice) {
     const sc = localSpeechScan(transcript);
     const dim = SPEECH_DIMS.find(d => d.key === L.dim);
     return `[과제] ${L.skill} — ${L.goal}
@@ -750,7 +750,7 @@ ${take > 1 ? `[리허설 ${take}회차] 직전 회차에서 코치가 준 과제
 글자 ${sc.chars} / 문장 ${sc.sentences}개, 평균 ${sc.meanLen}자 (40자 초과 ${sc.longSentences}개)
 채움말 ${sc.fillers}회(문장당 ${sc.fillerPerSentence}) ${sc.fillerHits.slice(0, 6).join(",")}
 신호어 ${sc.signposts}회 ${sc.signpostHits.slice(0, 5).join(",")} / 완충어 ${sc.hedges}회
-결론 위치: ${sc.conclusion}
+결론 위치: ${sc.conclusion}${voicePromptLine(voice)}
 [학습자 목표] ${state.goals || "(밝히지 않음)"}
 
 [학습자 발화 전사]
@@ -939,7 +939,7 @@ audience는 3~5개. type의 뜻 — laugh(웃음이 터짐) / lean(몸을 기울
 drift(딴생각이 듦) / confused(못 따라감) / flat(반응 없이 지나감).
 점수는 후하게 주지 마세요. 대부분의 첫 시도는 2~3점입니다. 5는 정말 잘 터졌을 때만.`;
 
-  function storyUserMessage(L, transcript, take, prevNote, topic) {
+  function storyUserMessage(L, transcript, take, prevNote, topic, voice) {
     const sc = localSpeechScan(transcript);
     const st = localStoryScan(transcript);
     const dim = STORY_DIMS.find(d => d.key === L.dim);
@@ -951,7 +951,7 @@ ${take > 1 ? `[리허설 ${take}회차] 직전 회차의 과제: ${prevNote || "
 [기계 분석 참고치 — 그대로 나열하지 말고 판단 근거로만]
 글자 ${sc.chars} / 문장 ${sc.sentences}개, 평균 ${sc.meanLen}자
 재연 대사 ${st.quotes}개 / 현재형 어미 ${st.present}회 / 청자 확인 ${st.invite}회 / 쉼 표시 ${st.pauses}개
-채움말 ${sc.fillers}회 / 감정 설명어 ${st.tellEmotion}회(많으면 '설명하고 있다'는 신호)
+채움말 ${sc.fillers}회 / 감정 설명어 ${st.tellEmotion}회(많으면 '설명하고 있다'는 신호)${voicePromptLine(voice)}
 
 [학습자의 썰 전사]
 ${transcript}
@@ -1871,6 +1871,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       <ul class="constraints">${(L.constraints || []).map(c => `<li>${esc(c)}</li>`).join("")}</ul>
       ${timer}
       ${speakHint}
+      ${micHTML(L)}
       <label style="margin-top:14px">✍️ 여기에 작성하세요
         <textarea id="submit-text" rows="10" data-limit="${limit || 0}" placeholder="${L.track === "speak" ? "말한 내용을 옮겨 적기…" : "과제를 여기에 작성하세요…"}">${esc(sess.submission)}</textarea>
       </label>
@@ -1879,6 +1880,82 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       <button class="btn ghost small" id="back-brief">← 레슨 다시 보기</button>
     </div>`;
   }
+  /* ---- 음성 입력 (실제 발화 측정) ----
+     말하기 과제에서만 뜬다. 브라우저가 지원 안 하면 조용히 숨고 타이핑이 그대로 남는다. */
+  /* 실제 녹음이 있을 때만 프롬프트에 붙는다. 타이핑만 했다면 이 줄 자체가 없다 —
+     없는 지표를 있는 척 넘기면 AI가 근거 없는 지적을 만들어낸다. */
+  function voicePromptLine(v) {
+    if (!v || v.seconds < 5) return "";   // 짧은 녹음의 분당 수치는 신뢰할 수 없다
+    return `\n[실제 발화 측정 — 녹음에서 나온 값이므로 전사문보다 우선한다]
+발화 ${v.seconds}초 / 말속도 ${v.wordsPerMin} 어절분 (편안한 구간 190~330)
+쉼 ${v.pauseCount}회, 분당 ${v.pausePerMin}회 (편안한 구간 5~14), 가장 긴 쉼 ${v.longestPauseSec}초
+침묵 비율 ${v.silentRatio}% / 채움말 분당 ${v.fillerPerMin}회
+이 수치에서 드러나는 전달 습관(너무 빠름·쉼 없음·말문 막힘 등)이 있으면 반드시 짚어라.`;
+  }
+  function isSpeakingTrack(L) {
+    return !!L && (L.track === "speak" || L.track === "social" || L.track === "story");
+  }
+  function micHTML(L) {
+    if (!isSpeakingTrack(L) || typeof Voice === "undefined" || !Voice.supported()) return "";
+    return `
+      <div class="mic-box" id="mic-box">
+        <button class="mic-btn" id="mic-btn" type="button"><span class="mic-dot"></span><span id="mic-label">🎙️ 말하면서 녹음하기</span></button>
+        <div class="mic-meta"><span id="mic-time">0:00</span>
+          <span class="muted">${Voice.transcriptSupported() ? "말하면 자동으로 받아 적어요" : "받아쓰기는 이 브라우저에서 안 돼요 — 속도·쉼만 측정됩니다"}</span></div>
+        <p class="muted small" id="mic-hint">타이핑하면 실제 말하기 습관(속도·쉼·채움말)은 측정되지 않아요. 소리 내어 말해보세요.</p>
+      </div>`;
+  }
+  /* 녹음 컨트롤을 특정 textarea에 붙인다. 끝나면 전사문을 넣고 지표를 세션에 저장한다. */
+  let _voiceSession = null;
+  function wireMic(sess, taSel, onDone) {
+    const btn = $("#mic-btn");
+    if (!btn) return;
+    const label = $("#mic-label"), timeEl = $("#mic-time"), hint = $("#mic-hint");
+    btn.addEventListener("click", async () => {
+      const ta = $(taSel);
+      if (_voiceSession) {                       // 정지
+        const r = _voiceSession.stop();
+        _voiceSession = null;
+        btn.classList.remove("rec");
+        label.textContent = "🎙️ 다시 녹음하기";
+        if (r.text && ta) { ta.value = r.text; ta.dispatchEvent(new Event("input")); }
+        sess.voice = r.metrics || null;
+        save();
+        if (hint && r.metrics) {
+          hint.innerHTML = r.metrics.seconds < 5
+            ? `${r.metrics.seconds}초는 너무 짧아 속도·쉼을 못 쟀어요. 10초 이상 말해보세요.`
+            : `실제 발화 ${r.metrics.seconds}초 · ${r.metrics.wordsPerMin} 어절/분 · 쉼 ${r.metrics.pauseCount}회`;
+        }
+        if (onDone) onDone(r);
+        return;
+      }
+      try {                                      // 시작
+        _voiceSession = Voice.createSession({
+          onText: (t) => { if (ta) { ta.value = t; ta.dispatchEvent(new Event("input")); } },
+          onTick: (s) => { if (timeEl) timeEl.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); },
+          onError: (m) => { if (hint) hint.textContent = m; }
+        });
+        await _voiceSession.start();
+        btn.classList.add("rec");
+        label.textContent = "⏹️ 멈추고 결과 보기";
+        if (hint) hint.textContent = "듣고 있어요. 편하게 말해보세요.";
+      } catch (e) {
+        _voiceSession = null;
+        if (hint) hint.textContent = "마이크를 쓸 수 없어요: " + e.message + " — 직접 타이핑해도 됩니다.";
+      }
+    });
+  }
+  /* 실제 발화 지표 표 — 타이핑으로는 절대 나올 수 없는 값들 */
+  function voiceMetricsHTML(m) {
+    if (!m) return "";
+    const rows = Voice.judge(m).map(j =>
+      `<div class="scan-row"><span class="scan-k">${esc(j.key)}</span>
+        <span class="scan-v"><b class="${j.ok ? "sv-ok" : "sv-warn"}">${esc(j.value)}</b></span>
+        <span class="scan-a">${esc(j.note)}</span></div>`).join("");
+    return `<div class="section-label">🎙️ 실제 발화 측정 <span class="muted" style="text-transform:none">· 녹음에서만 나오는 값</span></div>
+      <div class="scan-table">${rows}</div>`;
+  }
+
   function wireWrite(sess) {
     const ta = $("#submit-text"), cc = $("#submit-count");
     const limit = parseInt(ta.getAttribute("data-limit"), 10) || 0;
@@ -1889,6 +1966,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     };
     ta.addEventListener("input", () => { sess.submission = ta.value; upd(); });
     upd();
+    wireMic(sess, "#submit-text");
     if (lessonOf(sess).speak && $("#tm-start")) setupTimer();
     $("#submit-btn").addEventListener("click", () => {
       if (charLen(ta.value) < 20) { alert("조금 더 써 주세요 (최소 20자). 짧아도 좋으니 완성해 봅시다!"); return; }
@@ -2108,6 +2186,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
 
       <details class="hint-fold" open>
         <summary>📊 ${isStory ? "썰 장치 점검" : "발화 지표"} (기기에서 계산 · AI 없이)</summary>
+        ${voiceMetricsHTML(sess.voice)}
         ${isStory ? storyScanHTML(stScan, sc) : speechScanHTML(sc)}
         ${(L.hints || []).slice(0, 2).map(h => `<div class="notice-q">→ ${esc(h)}</div>`).join("")}
       </details>
@@ -2133,9 +2212,9 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       const prevNote = sess.speechReport && sess.speechReport.nextAction;
       const cur = currentSpeechText(sess);
       const take = (sess.revisePass || 0) + 1;
-      const msg = isStory ? storyUserMessage(L, cur, take, prevNote, sess.topic)
+      const msg = isStory ? storyUserMessage(L, cur, take, prevNote, sess.topic, sess.voice)
         : isSocial ? socialUserMessage(L, cur, sess.topic)
-        : speechUserMessage(L, cur, take, prevNote);
+        : speechUserMessage(L, cur, take, prevNote, sess.voice);
       requestSpeechReport("sp-fb", sys, msg, dims, (rep) => {
           sess.speechReport = rep; save();
           recordSpeech(rep, { day: sess.day, lessonId: L.id, track: L.track, take: sess.revisePass || 0 });
@@ -2321,8 +2400,9 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
 
       ${L.speak ? viewTimer(L) : ""}
 
-      <label style="margin-top:14px">🎙️ ${takeNo}회차 발화를 옮겨 적기
-        <textarea id="retry-text" rows="8" placeholder="다시 말한 내용을 옮겨 적으세요"></textarea>
+      ${micHTML(L)}
+      <label style="margin-top:14px">🎙️ ${takeNo}회차 발화
+        <textarea id="retry-text" rows="8" placeholder="녹음 버튼을 누르고 말하거나, 직접 옮겨 적으세요"></textarea>
       </label>
       <div class="char-count" id="retry-count">0자</div>
       <button class="btn primary" id="retry-submit">${takeNo < total ? `${takeNo}회차 제출` : "리허설 완료"}</button>
@@ -2333,6 +2413,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     const ta = $("#retry-text"), cc = $("#retry-count");
     const upd = () => { cc.textContent = charLen(ta.value) + "자"; };
     ta.addEventListener("input", upd); upd();
+    wireMic(sess, "#retry-text");
     if (isRehearsal(L) && L.speak && $("#tm-start")) setupTimer();
     $("#retry-submit").addEventListener("click", () => {
       const text = ta.value.trim();

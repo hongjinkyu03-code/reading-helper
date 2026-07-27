@@ -676,3 +676,17 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
 .fs-mine{background:#f2f1fd; border:1px solid #d6d3f7; border-radius:9px; padding:9px 11px;
   font-size:14px; line-height:1.65; margin-bottom:5px; white-space:pre-wrap}
 .fs-model{font-size:13px; color:var(--good); background:#eef8f1; border-radius:9px; padding:8px 11px; line-height:1.6}
+
+/* ---------- 음성 입력 (실제 발화 측정) ---------- */
+.mic-box{margin-top:14px; background:#fbfbfe; border:1px dashed #c9c9e6; border-radius:12px; padding:12px 13px}
+.mic-btn{display:flex; align-items:center; gap:9px; width:100%; border:none; border-radius:11px;
+  background:var(--primary); color:#fff; font-family:inherit; font-size:14.5px; font-weight:700;
+  padding:12px 14px; cursor:pointer; justify-content:center}
+.mic-btn.rec{background:var(--danger)}
+.mic-dot{width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.7); flex:0 0 auto}
+.mic-btn.rec .mic-dot{background:#fff; animation:micpulse 1s infinite}
+@keyframes micpulse{0%,100%{opacity:1}50%{opacity:.25}}
+.mic-meta{display:flex; align-items:center; gap:10px; margin-top:8px; font-size:12px}
+#mic-time{font-weight:800; color:var(--primary); font-variant-numeric:tabular-nums}
+.mic-meta .muted{font-size:11.5px; line-height:1.5}
+#mic-hint{margin:7px 0 0; font-size:12px; line-height:1.55}
