@@ -37,6 +37,8 @@ body{
 .app-header h1{font-size:19px; margin:0; font-weight:800; letter-spacing:-.3px}
 #header-day{font-size:13px; font-weight:700; opacity:.92; background:rgba(255,255,255,.16);
   padding:4px 10px; border-radius:999px}
+.usage-gauge{font-size:12px; font-weight:700; opacity:.92; background:rgba(255,255,255,.16);
+  padding:4px 9px; border-radius:999px; margin-right:6px}
 
 main{max-width:640px; margin:0 auto; padding:16px 14px 24px}
 
@@ -265,6 +267,11 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
   background:#f6f7fe; border:1px dashed #c9c9e6; border-radius:12px; padding:12px 14px; margin-top:12px}
 .ai-ask-text{font-size:14px; line-height:1.5}
 .usage-row{font-size:13px; color:var(--muted); margin-top:10px}
+.usage-bar-wrap{margin-top:6px}
+.usage-bar-track{height:8px; border-radius:999px; background:#eceefb; overflow:hidden}
+.usage-bar-fill{height:100%; border-radius:999px; background:#22a559; transition:width .25s ease}
+.usage-bar-fill.usage-warn{background:#e0a300}
+.usage-bar-fill.usage-over{background:#e0453c}
 .hint-fold{margin-top:12px; border:1px solid var(--line); border-radius:12px; background:#fff;
   padding:0 12px}
 .hint-fold summary{cursor:pointer; font-size:13px; font-weight:700; color:var(--muted);

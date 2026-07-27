@@ -35,6 +35,7 @@
 <body>
   <header class="app-header">
     <h1>✍️ 마스터 코치</h1>
+    <span id="header-usage"></span>
     <span id="header-day"></span>
   </header>
 
@@ -170,7 +171,13 @@
           안목 훈련 탭을 처음 여는 날 <b>하루 1회</b>만 호출해, 내 약점 축에 맞춘 새 A/B 문제를 만들어
           기기에 영구 저장합니다. 검증을 통과한 문제만 추가되고, 마음에 안 드는 문제는 삭제할 수 있어요.
         </p>
-        <p class="usage-row">오늘 AI 호출: <b id="ai-usage-count">0</b>회</p>
+        <label>하루 목표 호출 수 <span class="muted" style="font-size:12px">(무료 등급 한도는 시기마다 달라요 — 여유 있게 잡아두는 안전선)</span>
+          <input type="number" id="set-daily-budget" min="1" max="500" step="1">
+        </label>
+        <div class="usage-bar-wrap">
+          <div class="usage-bar-track"><div class="usage-bar-fill" id="usage-bar-fill"></div></div>
+          <p class="usage-row" id="usage-bar-text">오늘 0 / 40회 사용</p>
+        </div>
         <button class="btn primary" id="save-settings">저장</button>
         <button class="btn ghost small" id="test-ai">연결 테스트</button>
         <p id="ai-status" class="notify-status"></p>

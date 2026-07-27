@@ -106,6 +106,7 @@
     if (typeof set.aiEnabled !== "boolean") set.aiEnabled = false;
     if (typeof set.aiSaver !== "boolean") set.aiSaver = true;
     if (typeof set.autoGenDrills !== "boolean") set.autoGenDrills = true;
+    if (typeof set.dailyBudget !== "number" || set.dailyBudget <= 0) set.dailyBudget = 40;
     if (!s.plan) s.plan = {};
     if (!s.focusWhy) s.focusWhy = {};
     if (!s.recommendCats) s.recommendCats = [];
@@ -1117,10 +1118,18 @@ ${SPEECH_THEORY}
   }
 
   function renderHeader() {
+    updateHeaderUsage();
     const el = $("#header-day");
     if (!state.onboarded) { el.textContent = "진단 전"; return; }
     const active = state.activeSession;
     el.textContent = active ? `Day ${active.day}` : `Day ${state.currentDay}`;
+  }
+  /* AI 키가 있을 때만 노출 — 한도 이야기를 꺼낼 이유가 없으면 헤더를 비워둔다 */
+  function updateHeaderUsage() {
+    const el = $("#header-usage");
+    if (!el) return;
+    if (!aiReady()) { el.innerHTML = ""; return; }
+    el.innerHTML = usageGaugeHTML();
   }
 
   /* ------------------------ 오늘 탭 (세션) ------------------------ */
@@ -2781,7 +2790,16 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     $("#set-ai-enabled").checked = !!state.settings.aiEnabled;
     $("#set-ai-saver").checked = !!state.settings.aiSaver;
     $("#set-autogen").checked = !!state.settings.autoGenDrills;
-    $("#ai-usage-count").textContent = todayAIUsage();
+    $("#set-daily-budget").value = state.settings.dailyBudget || 40;
+    renderUsageBar();
+  }
+  function renderUsageBar() {
+    const u = aiUsageStatus();
+    $("#usage-bar-fill").style.width = u.pct + "%";
+    $("#usage-bar-fill").className = "usage-bar-fill usage-" + u.level;
+    $("#usage-bar-text").textContent = u.level === "over"
+      ? `오늘 ${u.count}회 사용 · 정해둔 목표(${u.budget}회)를 넘었어요`
+      : `오늘 ${u.count} / ${u.budget}회 사용 · ${u.remain}회 남음`;
   }
   function wireSettingsOnce() {
     $("#set-provider").addEventListener("change", () => {
@@ -2795,7 +2813,11 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       state.settings.aiEnabled = $("#set-ai-enabled").checked;
       state.settings.aiSaver = $("#set-ai-saver").checked;
       state.settings.autoGenDrills = $("#set-autogen").checked;
+      const budget = parseInt($("#set-daily-budget").value, 10);
+      state.settings.dailyBudget = budget > 0 ? budget : 40;
       save();
+      renderUsageBar();
+      updateHeaderUsage();
       setStatus("#ai-status", "저장했어요.", "ok");
     });
     $("#test-ai").addEventListener("click", testAI);
@@ -2967,9 +2989,28 @@ ${text}
     if (state.aiUsage.date !== t) state.aiUsage = { date: t, count: 0 };
     state.aiUsage.count += 1;
     save();
+    updateHeaderUsage();
   }
   function todayAIUsage() {
     return state.aiUsage.date === todayStr() ? state.aiUsage.count : 0;
+  }
+  /* 하루 목표 호출 수 대비 잔여량. 실제 API 한도가 아니라 사용자가 정한 안전선이므로
+     넘어도 호출을 막지는 않고, 얼마나 남았는지만 알려준다. */
+  function aiUsageStatus() {
+    const count = todayAIUsage();
+    const budget = state.settings.dailyBudget || 40;
+    const pct = Math.min(100, Math.round((count / budget) * 100));
+    const remain = Math.max(0, budget - count);
+    const level = count >= budget ? "over" : pct >= 80 ? "warn" : "ok";
+    return { count, budget, remain, pct, level };
+  }
+  function usageGaugeHTML() {
+    const u = aiUsageStatus();
+    const icon = u.level === "over" ? "🔴" : u.level === "warn" ? "🟡" : "🟢";
+    const msg = u.level === "over"
+      ? `오늘 목표(${u.budget}회)를 넘었어요 · ${u.count}회 사용`
+      : `오늘 ${u.count}/${u.budget}회 · ${u.remain}회 남음`;
+    return `<span class="usage-gauge usage-${u.level}" title="${esc(msg)}">${icon} ${u.count}/${u.budget}</span>`;
   }
 
   /* wantJSON=true 면 Gemini를 JSON 전용 출력 모드로 돌려 형식 붕괴를 크게 줄인다 */
