@@ -45,6 +45,8 @@
       planStale: false,       // 목표가 바뀌었는데 계획을 다시 짜지 않은 상태
       quality: [],            // 품질 6축 추이 [{date, day, scores, avg}]
       speech: [],             // 말하기·사회성 축 추이 [{date, track, scores}]
+      roleplay: null,         // 진행 중 롤플레이 대화
+      roleplayLog: [],        // 완료한 롤플레이 기록
       drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
       aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
       settings: {
@@ -80,6 +82,7 @@
     if (typeof s.planStale !== "boolean") s.planStale = false;
     if (!s.quality) s.quality = [];
     if (!s.speech) s.speech = [];
+    if (!s.roleplayLog) s.roleplayLog = [];
     if (!s.drills) s.drills = { done: [], correct: 0, total: 0 };
     if (!s.aiUsage) s.aiUsage = { date: "", count: 0 };
     if (!set.provider) set.provider = "gemini";
@@ -748,6 +751,70 @@ ${response}
       ${rep.upgrade ? `<div class="fb-block fb-next"><span class="fb-h">⬆️ 한 단계 깊게</span>${esc(rep.upgrade)}</div>` : ""}
       ${rep.nextAction ? `<div class="fb-block fb-next"><span class="fb-h">➡️ 다음 한 가지</span>${esc(rep.nextAction)}</div>` : ""}`;
   }
+
+  /* ==================== 롤플레이 (멀티턴 대화 시뮬레이션) ====================
+   * 사회적 말하기는 혼자 연습할 수 없다는 것이 가장 큰 장벽이다.
+   * AI가 코치가 아니라 '상대'로 반응해, 실제 대화 흐름 속에서 연습하게 한다.
+   * 매 턴 <coach> 태그로 숨은 관찰을 남겨 대화 종료 후 복기에 쓴다. */
+  const ROLEPLAY_SYSTEM = `당신은 지금 코치가 아니라 대화 상대입니다. 아래 인물이 되어 실제 사람처럼 반응하세요.
+
+## 연기 규칙
+- 응답은 1~3문장. 실제 대화처럼 짧게. 장황한 설명 금지.
+- 친절 보정 금지. 상대(학습자)가 어색하게 말하면 어색해하고, 재미없으면 시들해지고,
+  잘 받아주면 마음을 열어라. 당신의 반응이 곧 피드백이다.
+- 학습자를 가르치거나 평가하지 마라. 인물로서 말할 뿐이다.
+- 한국 대학생·직장 맥락의 자연스러운 한국어. 존댓말/반말은 인물 관계에 맞게.
+- 대화가 끊길 상황이면 억지로 살리지 마라 — 짧게 답하고 침묵해도 된다.
+
+## 출력 형식 (반드시 이 두 줄 구조)
+<say>인물로서 하는 말</say>
+<coach>학습자의 직전 발화에 대한 관찰 한 줄. 무엇을 잘했고 무엇이 아쉬웠는지. 학습자에게는 대화 중 보이지 않는다.</coach>
+<mood>open|neutral|closing</mood>
+
+mood는 지금 당신(인물)의 마음 상태다. 학습자가 잘하면 open, 그저 그러면 neutral,
+대화가 식어가면 closing. 정직하게 판정하라.`;
+
+  function roleplayUserMessage(scene, history, userTurn) {
+    const lines = history.map(h => `${h.role === "user" ? "상대(학습자)" : "나"}: ${h.text}`).join("\n");
+    return `[내가 연기할 인물] ${scene.persona}
+[상황] ${scene.label}
+[학습자의 연습 목표] ${scene.goal}
+
+[지금까지의 대화]
+${lines || "(아직 없음)"}
+상대(학습자): ${userTurn}
+
+인물로서 반응하세요. <say>/<coach>/<mood> 세 줄만 출력하세요.`;
+  }
+
+  function parseRoleplay(raw) {
+    const t = String(raw || "");
+    const say = (t.match(/<say>([\s\S]*?)<\/say>/) || [])[1];
+    const coach = (t.match(/<coach>([\s\S]*?)<\/coach>/) || [])[1];
+    const mood = (t.match(/<mood>([\s\S]*?)<\/mood>/) || [])[1];
+    return {
+      say: (say || t.replace(/<[^>]*>/g, "")).trim(),
+      coach: (coach || "").trim(),
+      mood: (mood || "neutral").trim().toLowerCase()
+    };
+  }
+
+  /* 대화 종료 후 총평 — 사회성 4축 + 대화 전체 복기 */
+  const ROLEPLAY_REVIEW_SYSTEM = `당신은 사회적 말하기 코치입니다. 학습자가 방금 마친 롤플레이 대화 전체를 보고 총평합니다.
+
+${SPEECH_THEORY}
+
+## 아래 JSON만 출력
+{
+ "scores":{"face":1-5,"listening":1-5,"reciprocity":1-5,"warmth":1-5},
+ "oneLine":"이 대화의 인상 한 문장",
+ "flow":"대화가 어떻게 흘렀는지 두 문장. 어디서 살아나고 어디서 식었는지.",
+ "best":{"quote":"학습자의 가장 좋았던 말","why":"왜 효과적이었는지"},
+ "miss":{"quote":"아쉬웠던 말","better":"이렇게 말했다면","why":"상대가 어떻게 다르게 느꼈을지"},
+ "principle":[{"id":"원리 번호","name":"원리","application":"..."}],
+ "nextAction":"다음 대화에서 시도할 딱 한 가지"
+}
+점수는 후하게 주지 마세요. 3이 보통입니다.`;
 
   function buildReviewLesson(day) {
     // 최근 다룬 서로 다른 기술 2~3개를 통합하는 과제 생성
@@ -2660,13 +2727,15 @@ ${text}
   let practiceCat = "all";
   const sitById = (id) => SITUATIONS.find(s => s.id === id);
 
-  let practiceMode = "situations";   // 'situations' | 'drills'
+  let practiceMode = "situations";   // 'situations' | 'drills' | 'roleplay'
   function segmentHTML() {
     const d = state.drills || { total: 0 };
+    const rp = (state.roleplayLog || []).length;
     return `
       <div class="seg-row">
-        <button class="seg ${practiceMode === "situations" ? "active" : ""}" data-mode="situations">🎤 상황별 말하기</button>
-        <button class="seg ${practiceMode === "drills" ? "active" : ""}" data-mode="drills">👁️ 안목 훈련${d.total ? `<span class="seg-n">${d.total}</span>` : ""}</button>
+        <button class="seg ${practiceMode === "situations" ? "active" : ""}" data-mode="situations">🎤 상황</button>
+        <button class="seg ${practiceMode === "roleplay" ? "active" : ""}" data-mode="roleplay">💬 롤플레이${rp ? `<span class="seg-n">${rp}</span>` : ""}</button>
+        <button class="seg ${practiceMode === "drills" ? "active" : ""}" data-mode="drills">👁️ 안목${d.total ? `<span class="seg-n">${d.total}</span>` : ""}</button>
       </div>`;
   }
   function renderPractice() {
@@ -2679,7 +2748,10 @@ ${text}
       ap.stage === "feedback" ? wirePracticeFeedback(ap, sit) : wirePracticeWrite(ap, sit);
       return;
     }
-    if (practiceMode === "drills") {
+    if (practiceMode === "roleplay") {
+      root.innerHTML = segmentHTML() + viewRoleplay();
+      wireSegments(); wireRoleplay();
+    } else if (practiceMode === "drills") {
       root.innerHTML = segmentHTML() + viewDrill();
       wireSegments(); wireDrill();
       maybeAutoGenerateDrills();
@@ -2692,6 +2764,196 @@ ${text}
     $$(".seg").forEach(s => s.addEventListener("click", () => {
       practiceMode = s.getAttribute("data-mode"); renderPractice(); window.scrollTo(0, 0);
     }));
+  }
+
+  /* ==================== 롤플레이 UI ==================== */
+  const MOOD_UI = {
+    open: ["😊", "mood-open", "마음을 열고 있어요"],
+    neutral: ["🙂", "mood-neutral", "무난하게 듣고 있어요"],
+    closing: ["😐", "mood-closing", "대화가 식어가요"]
+  };
+  function viewRoleplay() {
+    const rp = state.roleplay;
+    if (!rp) {
+      const cards = ROLEPLAY_SCENES.map(s => {
+        const done = (state.roleplayLog || []).filter(l => l.sceneId === s.id).length;
+        return `<div class="rp-card" data-scene="${s.id}">
+          <div class="rp-emoji">${s.emoji}</div>
+          <div class="rp-main">
+            <div class="rp-title">${esc(s.label)} ${done ? `<span class="rp-done">${done}회</span>` : ""}</div>
+            <div class="rp-goal">${esc(s.goal)}</div>
+          </div>
+          <div class="rp-diff" title="난이도">${"●".repeat(s.difficulty)}<span class="dim">${"○".repeat(5 - s.difficulty)}</span></div>
+        </div>`;
+      }).join("");
+      return `
+        <div class="card" style="padding:14px 16px">
+          <h2 style="margin-bottom:6px">💬 롤플레이 <span class="sub">실제 대화 연습</span></h2>
+          <p class="practice-intro">AI가 <b>코치가 아니라 상대</b>가 되어 실제처럼 반응합니다.
+          잘 받아주면 마음을 열고, 어색하면 대화가 식습니다. 사회적 말하기는 혼자 연습할 수 없는데,
+          여기서는 가능합니다.
+          ${aiReady() ? `<span class="muted" style="font-size:12px">· 턴마다 호출 1회</span>`
+            : `<br><span class="muted" style="font-size:12px">⚠️ 설정에서 무료 Gemini 키를 넣어야 대화할 수 있어요.</span>`}</p>
+        </div>
+        <div>${cards}</div>`;
+    }
+    const scene = ROLEPLAY_SCENES.find(s => s.id === rp.sceneId);
+    if (!scene) { state.roleplay = null; save(); return viewRoleplay(); }
+    if (rp.stage === "review") return viewRoleplayReview(rp, scene);
+    const mood = MOOD_UI[rp.mood] || MOOD_UI.neutral;
+    const bubbles = rp.history.map(h => h.role === "user"
+      ? `<div class="bub me">${esc(h.text)}</div>`
+      : `<div class="bub them"><span class="bub-who">${scene.emoji} ${esc(scene.label)}</span>${esc(h.text)}</div>`).join("");
+    const turns = rp.history.filter(h => h.role === "user").length;
+    return `
+      <button class="sit-back" id="rp-quit">← 롤플레이 목록</button>
+      <div class="card rp-head-card">
+        <div class="rp-head-row">
+          <div><b>${scene.emoji} ${esc(scene.label)}</b>
+            <div class="muted small">${esc(scene.goal)}</div></div>
+          <div class="mood-chip ${mood[1]}" title="${esc(mood[2])}">${mood[0]} ${esc(mood[2])}</div>
+        </div>
+        <div class="rp-turns">턴 ${turns} · ${esc(scene.tips.join(" / "))}</div>
+      </div>
+      <div class="chat-wrap" id="chat-wrap">${bubbles}
+        <div id="rp-typing"></div>
+      </div>
+      <div class="card" style="padding:12px">
+        <textarea id="rp-input" rows="3" placeholder="뭐라고 말할까요? 실제로 소리 내어 말해본 뒤 적으세요."></textarea>
+        <button class="btn primary" id="rp-send">보내기</button>
+        <button class="btn ghost small" id="rp-end">대화 끝내고 복기</button>
+        <p id="rp-status" class="notify-status"></p>
+      </div>`;
+  }
+  function viewRoleplayReview(rp, scene) {
+    const rev = rp.review;
+    const bubbles = rp.history.map(h => h.role === "user"
+      ? `<div class="bub me">${esc(h.text)}</div>`
+      : `<div class="bub them"><span class="bub-who">${scene.emoji}</span>${esc(h.text)}</div>`).join("");
+    const notes = rp.history.filter(h => h.coach).map((h, i) =>
+      `<div class="coach-note"><span class="cn-n">${i + 1}</span>${esc(h.coach)}</div>`).join("");
+    const body = rev ? `
+      ${rev.oneLine ? `<div class="fb-block fb-now"><span class="fb-h">🗣️ 총평</span>${esc(rev.oneLine)}</div>` : ""}
+      ${rev.flow ? `<div class="fb-block fb-now"><span class="fb-h">🌊 대화의 흐름</span>${esc(rev.flow)}</div>` : ""}
+      ${renderSpeechReport({ scores: rev.scores, principle: rev.principle, nextAction: rev.nextAction }, SOCIAL_DIMS)}
+      ${rev.best ? `<div class="fb-block fb-praise"><span class="fb-h">👏 가장 좋았던 말</span>
+        <div class="quote-line">“${esc(rev.best.quote || "")}”</div>${esc(rev.best.why || "")}</div>` : ""}
+      ${rev.miss ? `<div class="fb-block fb-surgery"><span class="fb-h">✂️ 아쉬웠던 말</span>
+        <div class="sg before"><span class="sg-tag">전</span>${esc(rev.miss.quote || "")}</div>
+        <div class="sg after"><span class="sg-tag">후</span>${esc(rev.miss.better || "")}</div>
+        <div class="sg why">→ ${esc(rev.miss.why || "")}</div></div>` : ""}
+    ` : `<div id="rp-review-slot"><span class="spinner"></span>대화를 복기하는 중…</div>`;
+    return `
+      <button class="sit-back" id="rp-quit">← 롤플레이 목록</button>
+      <div class="card">
+        <h2>💬 ${scene.emoji} ${esc(scene.label)} — 복기</h2>
+        <div class="chat-wrap review">${bubbles}</div>
+      </div>
+      <div class="card">${body}</div>
+      ${notes ? `<div class="card"><h2>🔍 턴별 코치 관찰</h2>
+        <p class="muted small">대화 중에는 숨겨져 있던 관찰입니다.</p>${notes}</div>` : ""}
+      <button class="btn primary" id="rp-again">다시 연습하기</button>`;
+  }
+  function wireRoleplay() {
+    const back = $("#rp-quit");
+    if (back) back.addEventListener("click", () => { state.roleplay = null; save(); renderPractice(); });
+    $$(".rp-card").forEach(c => c.addEventListener("click", () => {
+      if (!aiReady()) { alert("롤플레이는 AI 상대가 필요해요. 설정에서 무료 Gemini 키를 넣어주세요."); return; }
+      const scene = ROLEPLAY_SCENES.find(s => s.id === c.getAttribute("data-scene"));
+      state.roleplay = {
+        sceneId: scene.id, stage: "chat", mood: "neutral",
+        history: [{ role: "them", text: scene.opening }], review: null
+      };
+      save(); renderPractice(); window.scrollTo(0, 0);
+    }));
+    const send = $("#rp-send");
+    if (send) send.addEventListener("click", roleplaySend);
+    const inp = $("#rp-input");
+    if (inp) inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) roleplaySend();
+    });
+    const end = $("#rp-end");
+    if (end) end.addEventListener("click", roleplayEnd);
+    const again = $("#rp-again");
+    if (again) again.addEventListener("click", () => {
+      const sid = state.roleplay && state.roleplay.sceneId;
+      const scene = ROLEPLAY_SCENES.find(s => s.id === sid);
+      state.roleplay = scene ? { sceneId: sid, stage: "chat", mood: "neutral",
+        history: [{ role: "them", text: scene.opening }], review: null } : null;
+      save(); renderPractice(); window.scrollTo(0, 0);
+    });
+    const wrap = $("#chat-wrap");
+    if (wrap) wrap.scrollTop = wrap.scrollHeight;
+    if (state.roleplay && state.roleplay.stage === "review" && !state.roleplay.review) roleplayReview();
+  }
+  let _rpBusy = false;
+  async function roleplaySend() {
+    if (_rpBusy) return;
+    const inp = $("#rp-input");
+    const text = (inp.value || "").trim();
+    if (charLen(text) < 2) { setStatus("#rp-status", "뭐라도 말해보세요.", "err"); return; }
+    const rp = state.roleplay;
+    const scene = ROLEPLAY_SCENES.find(s => s.id === rp.sceneId);
+    _rpBusy = true;
+    rp.history.push({ role: "user", text: text });
+    inp.value = "";
+    save(); renderPractice();
+    const typing = $("#rp-typing");
+    if (typing) typing.innerHTML = `<div class="bub them typing"><span class="spinner"></span>…</div>`;
+    try {
+      const hist = rp.history.slice(0, -1);
+      const raw = await callAI(ROLEPLAY_SYSTEM, roleplayUserMessage(scene, hist, text), 700);
+      const p = parseRoleplay(raw);
+      rp.history.push({ role: "them", text: p.say, coach: p.coach });
+      // 직전 학습자 턴에 코치 관찰을 붙인다
+      for (let i = rp.history.length - 1; i >= 0; i--) {
+        if (rp.history[i].role === "user") { rp.history[i].coach = p.coach; break; }
+      }
+      rp.mood = MOOD_UI[p.mood] ? p.mood : "neutral";
+      save(); renderPractice();
+    } catch (e) {
+      setStatus("#rp-status", "응답 실패: " + e.message, "err");
+      const t2 = $("#rp-typing"); if (t2) t2.innerHTML = "";
+    } finally { _rpBusy = false; }
+  }
+  function roleplayEnd() {
+    const rp = state.roleplay;
+    const turns = rp.history.filter(h => h.role === "user").length;
+    if (!turns) { setStatus("#rp-status", "한 마디라도 나눠보고 끝내세요.", "err"); return; }
+    rp.stage = "review"; save(); renderPractice(); window.scrollTo(0, 0);
+  }
+  async function roleplayReview() {
+    const rp = state.roleplay;
+    const scene = ROLEPLAY_SCENES.find(s => s.id === rp.sceneId);
+    const lines = rp.history.map(h => `${h.role === "user" ? "학습자" : scene.label}: ${h.text}`).join("\n");
+    const msg = `[상황] ${scene.label} — ${scene.persona}
+[학습자의 목표] ${scene.goal}
+
+[대화 전문]
+${lines}
+
+이 대화 전체를 총평하고 JSON만 출력하세요.`;
+    try {
+      const raw = await callAI(ROLEPLAY_REVIEW_SYSTEM, msg, 3200, true);
+      const j = extractJSON(raw);
+      rp.review = j;
+      state.roleplayLog = state.roleplayLog || [];
+      state.roleplayLog.push({
+        date: todayStr(), sceneId: scene.id, label: scene.label,
+        turns: rp.history.filter(h => h.role === "user").length,
+        scores: j.scores || null, oneLine: j.oneLine || ""
+      });
+      if (j.scores) recordSpeech(j, { day: state.currentDay, lessonId: "rp-" + scene.id, track: "social", take: 0 });
+      // 하루 한 번만 활동으로 집계
+      if (state.roleplayLastDate !== todayStr()) { state.roleplayLastDate = todayStr(); recordActivity(); }
+      save(); renderPractice();
+    } catch (e) {
+      const s = $("#rp-review-slot");
+      if (s) s.innerHTML = `<span style="color:var(--danger)">복기 실패: ${esc(e.message)}</span>
+        <button class="btn ghost small" id="rp-rev-retry">다시 시도</button>`;
+      const rb = $("#rp-rev-retry");
+      if (rb) rb.addEventListener("click", roleplayReview);
+    }
   }
 
   /* ==================== A/B 안목 훈련 (API 0원) ====================
