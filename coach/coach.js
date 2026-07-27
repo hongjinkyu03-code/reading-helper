@@ -1111,6 +1111,7 @@ ${SPEECH_THEORY}
   /* ============================ 렌더링 ============================ */
   function renderAll() {
     renderHeader();
+    renderModeBar();
     renderToday();
     renderProgress();
     renderLog();
@@ -2584,15 +2585,43 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       </button>`;
     }).join("");
     $$(".preset-btn").forEach(b => b.addEventListener("click", () => {
-      const k = b.getAttribute("data-preset");
-      if (k === state.preset) return;
-      state.preset = k;
-      // 프리셋이 바뀌면 기존 계획의 트랙이 안 맞으므로 계획을 비운다
-      state.plan = {}; state.planFrom = 0; state.planStale = !!state.goals;
-      save(); renderProgress(); renderToday();
-      setStatus("#preset-status", `‘${TRACK_PRESETS[k].label}’으로 바꿨어요. 다음 세션부터 적용됩니다.` +
-        (state.goals ? " 목표에 맞춰 다시 계획하면 더 정확해져요." : ""), "ok");
+      setPreset(b.getAttribute("data-preset"), "#preset-status");
     }));
+  }
+
+  /* 프리셋 전환 — 진도 탭의 5종 그리드와 상단 글쓰기/말하기 퀵 스위치가 함께 쓴다 */
+  function setPreset(k, statusSel) {
+    if (!TRACK_PRESETS[k] || k === state.preset) return;
+    state.preset = k;
+    // 프리셋이 바뀌면 기존 계획의 트랙이 안 맞으므로 계획을 비운다
+    state.plan = {}; state.planFrom = 0; state.planStale = !!state.goals;
+    save(); renderProgress(); renderToday(); renderModeBar();
+    if (statusSel) {
+      setStatus(statusSel, `‘${TRACK_PRESETS[k].label}’으로 바꿨어요. 다음 세션부터 적용됩니다.` +
+        (state.goals ? " 목표에 맞춰 다시 계획하면 더 정확해져요." : ""), "ok");
+    }
+  }
+
+  /* 헤더 아래 상시 노출되는 글쓰기 ↔ 말하기 퀵 스위치.
+     세밀한 5종 프리셋(진도 탭)이 있지만, 매일 쓰기엔 이 이진 스위치 하나로 충분하다.
+     writing만 '글쓰기' 쪽이고 나머지(균형/말하기/썰/사회성)는 전부 말하기 비중이 있어 '말하기' 쪽으로 묶는다. */
+  function renderModeBar() {
+    const bar = $("#mode-bar");
+    if (!bar) return;
+    if (!state.onboarded) { bar.style.display = "none"; return; }
+    bar.style.display = "";
+    const speaking = state.preset !== "writing";
+    const sw = $("#mode-switch");
+    sw.setAttribute("aria-checked", String(speaking));
+    sw.classList.toggle("on", speaking);
+    $("#mode-bar").classList.toggle("on", speaking);
+  }
+  function wireModeBar() {
+    $("#mode-switch").addEventListener("click", () => {
+      const speaking = state.preset !== "writing";
+      setPreset(speaking ? "writing" : "speaking", null);
+      renderModeBar();
+    });
   }
 
   /* 긴장도 추이 — 노출 반복으로 줄어드는지 보여준다 */
@@ -4108,6 +4137,7 @@ ${ap.response}
     $$(".nav-btn").forEach(b => b.addEventListener("click", () => switchTab(b.getAttribute("data-tab"))));
     save();   // 구버전 설정 이관 결과를 즉시 영구 저장
     wireSettingsOnce();
+    wireModeBar();
     setupInstall();
     renderAll();
     if ("serviceWorker" in navigator) {

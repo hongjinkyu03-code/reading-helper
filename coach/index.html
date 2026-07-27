@@ -33,11 +33,20 @@
     media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)">
 </head>
 <body>
-  <header class="app-header">
-    <h1>✍️ 마스터 코치</h1>
-    <span id="header-usage"></span>
-    <span id="header-day"></span>
-  </header>
+  <div class="top-fixed">
+    <header class="app-header">
+      <h1>✍️ 마스터 코치</h1>
+      <span id="header-usage"></span>
+      <span id="header-day"></span>
+    </header>
+    <div class="mode-bar" id="mode-bar" style="display:none">
+      <span class="mode-lbl mode-lbl-write">✍️ 글쓰기</span>
+      <button class="mode-switch" id="mode-switch" role="switch" aria-checked="false" aria-label="글쓰기·말하기 모드 전환">
+        <span class="mode-knob"></span>
+      </button>
+      <span class="mode-lbl mode-lbl-speak">🎙️ 말하기</span>
+    </div>
+  </div>
 
   <main>
     <!-- ===================== 오늘 탭 (세션) ===================== -->
