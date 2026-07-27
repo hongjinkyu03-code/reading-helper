@@ -17,8 +17,8 @@
   /* 트랙 순환 패턴 (Day 2부터): 구조2 · 품질2 · 말하기2 · 복습1 = 7일 주기
      구조(문장·문단)와 품질(개연성·흥미·어휘)을 번갈아 배치해 서로를 보강한다. */
   const TRACK_PATTERN = ["write", "quality", "speak", "write", "quality", "speak", "review"];
-  const TRACK_NAMES = { write: "구조", quality: "품질", speak: "말하기", review: "복습·통합", diagnostic: "진단" };
-  const TRACK_ICONS = { write: "✍️ 구조", quality: "✨ 품질", speak: "🎙️ 말하기", review: "🔁 복습·통합" };
+  const TRACK_NAMES = { write: "구조", quality: "품질", speak: "말하기", social: "사회성", review: "복습·통합", diagnostic: "진단" };
+  const TRACK_ICONS = { write: "✍️ 구조", quality: "✨ 품질", speak: "🎙️ 말하기", social: "🤝 사회성", review: "🔁 복습·통합" };
 
   /* ----------------------------- 상태 ----------------------------- */
   function defaultState() {
@@ -44,6 +44,7 @@
       recommendCats: [],      // 목표에 맞는 실전 말하기 카테고리
       planStale: false,       // 목표가 바뀌었는데 계획을 다시 짜지 않은 상태
       quality: [],            // 품질 6축 추이 [{date, day, scores, avg}]
+      speech: [],             // 말하기·사회성 축 추이 [{date, track, scores}]
       drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
       aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
       settings: {
@@ -78,6 +79,7 @@
     if (typeof s.planFrom !== "number") s.planFrom = 0;
     if (typeof s.planStale !== "boolean") s.planStale = false;
     if (!s.quality) s.quality = [];
+    if (!s.speech) s.speech = [];
     if (!s.drills) s.drills = { done: [], correct: 0, total: 0 };
     if (!s.aiUsage) s.aiUsage = { date: "", count: 0 };
     if (!set.provider) set.provider = "gemini";
@@ -203,6 +205,73 @@
     return `<div class="scan-table">${rows.join("")}</div>`;
   }
 
+  /* ---- 로컬 말하기 분석 (API 0원) ----
+   * 글과 말은 기준이 다르다. 말은 되돌려 들을 수 없어 문장이 더 짧아야 하고,
+   * 채움말·신호어·결론 위치가 이해도를 좌우한다. 이 지표를 프롬프트에도 넣어
+   * 1회 호출의 정확도를 올린다. */
+  function countList(text, list) {
+    let n = 0, hits = [];
+    (list || []).forEach(w => {
+      const c = (String(text).split(w).length - 1);
+      if (c > 0) { n += c; hits.push(w + (c > 1 ? "×" + c : "")); }
+    });
+    return { n, hits };
+  }
+  function localSpeechScan(transcript) {
+    const t = String(transcript || "");
+    const sents = splitSentences(t);
+    const lens = sents.map(charLen);
+    const n = lens.length;
+    const mean = n ? Math.round(lens.reduce((a, b) => a + b, 0) / n) : 0;
+    const fillers = countList(t, SPEECH_LEXICON.fillers);
+    const signposts = countList(t, SPEECH_LEXICON.signposts);
+    const hedges = countList(t, SPEECH_LEXICON.hedges);
+    const listening = countList(t, SPEECH_LEXICON.listeningMarkers);
+    const questions = countList(t, SPEECH_LEXICON.questionMarkers);
+    // 결론 위치 — 결론 표지가 앞 1/3에 있으면 두괄식
+    const concIdx = SPEECH_LEXICON.conclusionMarkers
+      .map(w => t.indexOf(w)).filter(i => i >= 0).sort((a, b) => a - b)[0];
+    let conclusion = "불명";
+    if (typeof concIdx === "number" && t.length) {
+      const r = concIdx / t.length;
+      conclusion = r < 0.34 ? "앞(두괄식)" : r < 0.67 ? "중간" : "뒤(미괄식)";
+    }
+    return {
+      chars: charLen(t), sentences: n, meanLen: mean,
+      longSentences: lens.filter(l => l > 40).length,
+      fillers: fillers.n, fillerHits: fillers.hits,
+      signposts: signposts.n, signpostHits: signposts.hits,
+      hedges: hedges.n, hedgeHits: hedges.hits,
+      listening: listening.n, questions: questions.n,
+      questionMarks: countMatches(t, /\?/g),
+      conclusion: conclusion,
+      fillerPerSentence: n ? +(fillers.n / n).toFixed(1) : 0
+    };
+  }
+  /* 스캔 결과를 사람이 읽는 카드로 (오프라인에서도 유용한 피드백) */
+  function speechScanHTML(sc) {
+    const row = (emoji, label, value, verdict, good) =>
+      `<div class="scan-row"><span class="scan-k">${emoji} ${label}</span>
+        <span class="scan-v"><b class="${good ? "sv-ok" : "sv-warn"}">${esc(value)}</b></span>
+        <span class="scan-a">${esc(verdict)}</span></div>`;
+    const rows = [];
+    rows.push(row("🗣️", "채움말", `${sc.fillers}회 (문장당 ${sc.fillerPerSentence})`,
+      sc.fillerPerSentence <= 0.5 ? "자연스러운 수준이에요." : "문장 경계마다 나오면 준비 부족으로 들려요. 침묵으로 대체하세요.",
+      sc.fillerPerSentence <= 0.5));
+    rows.push(row("🧭", "신호어", `${sc.signposts}회`,
+      sc.signposts >= 2 ? "청자가 길을 찾을 수 있어요." : "'첫째/정리하면'을 넣으면 이해도가 올라갑니다.",
+      sc.signposts >= 2));
+    rows.push(row("✂️", "문장 길이", `평균 ${sc.meanLen}자 (40자 초과 ${sc.longSentences}개)`,
+      sc.meanLen <= 30 ? "말하기에 적절한 길이예요." : "말은 글보다 짧아야 해요. 접속어미에서 끊으세요.",
+      sc.meanLen <= 30));
+    rows.push(row("🎯", "결론 위치", sc.conclusion,
+      sc.conclusion === "앞(두괄식)" ? "결론이 먼저 도착합니다." : "결론을 첫 문장으로 올리면 30초 안에 요점이 전달돼요.",
+      sc.conclusion === "앞(두괄식)"));
+    if (sc.hedges > 2) rows.push(row("🌀", "완충어", `${sc.hedges}회`,
+      "'~같아요'가 많으면 주장이 흐려집니다. 아는 건 단언하세요.", false));
+    return `<div class="scan-table">${rows.join("")}</div>`;
+  }
+
   /* 규칙 기반 진단 — API 없이 약점 후보를 커리큘럼 기술로 매핑 */
   function localDiagnose(text) {
     const m = metrics(text);
@@ -273,13 +342,17 @@
 
   /* ----------------------------- 스케줄러 ----------------------------- */
   /* 구조 트랙(문장·문단·글 전체)과 품질 트랙(개연성·흥미·어휘…)을 함께 굴린다 */
-  const ALL_LESSONS = CURRICULUM.concat(QUALITY_LESSONS);
+  const ALL_LESSONS = CURRICULUM.concat(QUALITY_LESSONS, SPEECH_LESSONS, SOCIAL_LESSONS);
   const WRITE_POOL = CURRICULUM.filter(l => l.track === "write");
-  const SPEAK_POOL = CURRICULUM.filter(l => l.track === "speak");
+  /* 말하기 풀 = 기존 curriculum의 speak 레슨 + 새 스피치 레슨(리허설 구조) */
+  const SPEAK_POOL = CURRICULUM.filter(l => l.track === "speak").concat(SPEECH_LESSONS);
   const QUALITY_POOL = QUALITY_LESSONS;
-  const POOLS = { write: WRITE_POOL, speak: SPEAK_POOL, quality: QUALITY_POOL };
+  const SOCIAL_POOL = SOCIAL_LESSONS;
+  const POOLS = { write: WRITE_POOL, speak: SPEAK_POOL, quality: QUALITY_POOL, social: SOCIAL_POOL };
   const byId = (id) => ALL_LESSONS.find(l => l.id === id);
-  const dimOf = (key) => QUALITY_DIMS.find(d => d.key === key);
+  /* 축 조회 — 품질/말하기/사회성 축을 모두 커버 */
+  const ALL_DIMS = QUALITY_DIMS.concat(SPEECH_DIMS, SOCIAL_DIMS);
+  const dimOf = (key) => ALL_DIMS.find(d => d.key === key);
 
   function trackForDay(day) {
     if (day <= 1) return "diagnostic";
@@ -499,6 +572,183 @@ ${text}
     save();
   }
 
+  /* ==================== 스피치 코치 (말하기·사회성) ====================
+   * docs/speech-coach-prompt.md 설계 반영.
+   * 이론에 번호를 붙여 인용을 강제하고, 판단 절차를 명시해 Flash급 모델의
+   * 일관성을 끌어올린다. 오개념(메라비언 7-38-55 등)은 명시적으로 차단. */
+  const SPEECH_THEORY = `## 이론 기반 (판단 근거 — 지적할 때 원리 이름을 밝힐 것)
+[전달·구조]
+1 인지부하(Sweller): 듣기는 되돌릴 수 없다. 말의 문장은 글보다 짧아야 한다.
+2 Given-New: 아는 정보에서 새 정보로. 새 정보를 문두에 쏟으면 청자가 놓친다.
+3 결론 선행(PREP/BLUF): 주의는 처음 30초가 최대다. 결론을 먼저, 이유·예시는 뒤에.
+4 담화 표지: '첫째/정리하면/중요한 건'이 청자의 길찾기를 돕는다.
+5 채움말: 소량은 자연스럽다. 문장 경계마다면 준비 부족 신호. 목표는 0이 아니라 '침묵으로 대체'.
+[불안·심리]
+6 발표불안은 성인 다수의 정상 반응. 인지 요소(파국적 예상)와 신체 요소를 구분해 다룬다.
+7 재평가: '진정하자'보다 '이 각성은 흥분이다'가 수행을 올린다.
+8 노출 위계: 불안은 회피로 강화된다. 쉬운 상황부터 단계적으로.
+9 자기초점 주의: 불안한 화자는 주의가 자기 몸으로 향한다. 주의를 청자로 돌리게 하라.
+10 성장 마인드셋: 피드백은 능력이 아니라 '전략'에 귀속시켜라.
+[사회적 상호작용]
+11 협력 원리(Grice): 필요한 만큼(양)·참되게(질)·관련되게(관련)·명료하게(방식).
+12 공손 이론(Brown & Levinson): 요청·거절·반대는 체면 위협. 완충과 직설의 균형이 기술이다.
+13 순서교대(Sacks/Schegloff): 끼어들기·침묵 견디기·순서 넘겨주기는 학습 가능한 기술.
+14 적극적 경청: 재진술·감정 반영·후속 질문이 신뢰를 만든다. 사회성은 '받기'에서 갈린다.
+15 후속 질문과 호감: 질문을 많이 하는 사람이 더 호감을 산다. 자기 말만 하면 깎인다.
+16 자기개방(사회침투): 점진적·상호적 개방이 친밀감을 만든다. 이르거나 일방적이면 역효과.
+17 스포트라이트 효과: 타인은 내 실수를 내가 생각하는 것보다 훨씬 덜 본다.
+18 산출·인출 연습: 소리 내어 반복한 발화가 묵독 준비보다 수행을 올린다.
+19 피드백(Hattie & Timperley): 목표-현재-다음 세 질문에 답해야 학습이 된다.
+20 ZPD(Vygotsky): 지금보다 반 걸음 위를 겨냥하라.
+
+## 오개념 금지
+- '의사소통의 93%는 비언어'(메라비언 7-38-55)는 특수 실험의 오용이다. 인용 금지.
+- '청중을 감자로 봐라', '떨지 마라' 류의 통념 조언 금지.
+- 위 번호를 붙일 수 없는 주장은 하지 마라.
+
+## 학습자
+한국 20대 남성 대학생. 맥락(선후배 존대, 조별과제, MT·회식, 발표 수업, 면접)을 안다.
+흔한 패턴: 배경부터 길게 말하고 결론이 늦음, 감정 표현·스몰토크 회피, 불안을 무뚝뚝함으로
+위장, 모르는 주제에서 침묵으로 이탈. 단, 실제 발화에서 확인된 것만 지적하라.
+존댓말로, 훈계하지 말 것. 코치는 심판이 아니라 트레이너다.
+
+## 판단 절차 (이 순서로 사고하라)
+1 발화의 의도를 한 문장으로 규정한다.
+2 청자로서 처음 듣는다고 가정하고 놓친 지점·지루한 지점을 표시한다.
+3 위 원리 중 실제로 적용되는 것만 최대 3개 고른다.
+4 발화의 실제 구절을 인용해 원리와 연결한다. 인용 없는 지적은 버린다.
+5 개선은 딱 2가지로 압축한다.
+6 다음에 시도할 행동 1가지를 30초 안에 실행 가능한 크기로 정한다.
+
+## JSON 형식 주의 (반드시)
+- 값 안에 큰따옴표(")를 쓰지 마세요. 인용은 따옴표 없이 쓰세요.
+- 값 안에서 줄바꿈하지 마세요. 마지막 항목 뒤 콤마 금지.`;
+
+  const SPEECH_SYSTEM = `당신은 한국 20대 남성 대학생을 위한 스피치 코치입니다.
+전사문만 보고 판단하되, 이것이 '말'이라는 점을 잊지 마세요 — 글의 기준으로 재지 마세요.
+
+${SPEECH_THEORY}
+
+## 아래 JSON만 출력
+{
+ "scores":{"logic":1-5,"delivery":1-5,"audience":1-5,"confidence":1-5},
+ "oneLine":"청자로서 들은 소감 한 문장. 솔직하게.",
+ "listenerMoment":[{"type":"hooked|lost|bored|confused","quote":"발화의 실제 인용","note":"청자에게 일어난 일 한두 문장"}],
+ "principle":[{"id":"원리 번호","name":"원리 이름","application":"이 발화에 어떻게 적용되는지"}],
+ "fixes":[{"quote":"원래 발화","better":"이렇게 말했다면","why":"무엇이 달라지는지"}],
+ "nextAction":"다음 발화에서 시도할 딱 한 가지 (30초 안에 실행 가능한 크기)"
+}
+listenerMoment는 3~4개, 최소 1개는 hooked를 포함. fixes는 1~2개.
+점수는 후하게 주지 마세요. 3이 보통, 5는 예외적으로 뛰어날 때만.`;
+
+  const SOCIAL_SYSTEM = `당신은 한국 20대 남성 대학생의 사회적 말하기를 돕는 코치입니다.
+학습자가 특정 사회적 상황에서 한 말을 보고, 먼저 '상대가 어떻게 느꼈을지'를 시뮬레이션합니다.
+
+${SPEECH_THEORY}
+
+## 아래 JSON만 출력
+{
+ "partnerFeel":"상대가 느꼈을 것 한 문장. 긍정이면 왜, 부정이면 왜.",
+ "partnerReply":"상대가 실제로 할 법한 다음 말 한 마디",
+ "scores":{"face":1-5,"listening":1-5,"reciprocity":1-5,"warmth":1-5},
+ "oneLine":"이 응답의 사회적 인상 한 문장",
+ "principle":[{"id":"원리 번호","name":"원리 이름","application":"..."}],
+ "fixes":[{"quote":"원래 말","better":"이렇게 말했다면","why":"상대가 어떻게 다르게 느끼는지"}],
+ "upgrade":"이 대화를 한 단계 깊게 만들 다음 한 마디 (후속 질문 또는 자기개방)",
+ "nextAction":"다음에 시도할 딱 한 가지"
+}
+점수는 후하게 주지 마세요. 3이 보통입니다. fixes는 1~2개.`;
+
+  function speechUserMessage(L, transcript, take, prevNote) {
+    const sc = localSpeechScan(transcript);
+    const dim = SPEECH_DIMS.find(d => d.key === L.dim);
+    return `[과제] ${L.skill} — ${L.goal}
+[겨냥하는 축] ${dim ? dim.label + ": " + dim.detail : L.dim || ""}
+[상황] 준비 ${(L.speak || {}).prepSec || 0}초, 발화 ${(L.speak || {}).speakSec || 0}초
+[제약] ${(L.constraints || []).join(" / ")}
+${take > 1 ? `[리허설 ${take}회차] 직전 회차에서 코치가 준 과제: ${prevNote || "(없음)"}\n이번 발화에서 그것이 개선됐는지 먼저 확인하세요.\n` : ""}
+[기계 분석 참고치 — 그대로 나열하지 말고 판단 근거로만]
+글자 ${sc.chars} / 문장 ${sc.sentences}개, 평균 ${sc.meanLen}자 (40자 초과 ${sc.longSentences}개)
+채움말 ${sc.fillers}회(문장당 ${sc.fillerPerSentence}) ${sc.fillerHits.slice(0, 6).join(",")}
+신호어 ${sc.signposts}회 ${sc.signpostHits.slice(0, 5).join(",")} / 완충어 ${sc.hedges}회
+결론 위치: ${sc.conclusion}
+[학습자 목표] ${state.goals || "(밝히지 않음)"}
+
+[학습자 발화 전사]
+${transcript}
+
+판단 절차 1~6단계를 거쳐 JSON만 출력하세요.`;
+  }
+
+  function socialUserMessage(L, response, sceneText) {
+    const sc = localSpeechScan(response);
+    const dim = SOCIAL_DIMS.find(d => d.key === L.dim);
+    return `[과제] ${L.skill} — ${L.goal}
+[겨냥하는 축] ${dim ? dim.label + ": " + dim.detail : L.dim || ""}
+[상황] ${sceneText || L.task}
+[제약] ${(L.constraints || []).join(" / ")}
+[기계 분석 참고치] 경청 표지 ${sc.listening}회 / 질문 표지 ${sc.questions}회 / 물음표 ${sc.questionMarks}개 / 완충어 ${sc.hedges}회
+
+[학습자의 응답]
+${response}
+
+상대의 반응을 시뮬레이션하고 JSON만 출력하세요.`;
+  }
+
+  /* 말하기·사회성 리포트 렌더 */
+  function renderSpeechReport(rep, dims) {
+    if (!rep || !rep.scores) return "";
+    const D = dims || SPEECH_DIMS;
+    const bars = D.map(d => {
+      const v = rep.scores[d.key] || 0;
+      const pct = Math.max(0, Math.min(100, v / 5 * 100));
+      const cls = v <= 2 ? "low" : v === 3 ? "mid" : "high";
+      return `<div class="qbar-row" title="${esc(d.detail)}">
+        <span class="qbar-label">${d.emoji} ${esc(d.label)}</span>
+        <span class="qbar-track"><span class="qbar-fill ${cls}" style="width:${pct}%"></span></span>
+        <span class="qbar-val ${cls}">${v}</span></div>`;
+    }).join("");
+    const avg = D.map(d => rep.scores[d.key]).filter(v => typeof v === "number");
+    const mean = avg.length ? (avg.reduce((a, b) => a + b, 0) / avg.length) : 0;
+    const LM = {
+      hooked: ["rr-good", "🎣", "귀가 열린 지점"], lost: ["rr-confused", "🌀", "놓친 지점"],
+      bored: ["rr-bored", "😐", "지루해진 지점"], confused: ["rr-confused", "❓", "못 따라간 지점"]
+    };
+    const moments = (rep.listenerMoment || []).map(m => {
+      const st = LM[m.type] || LM.hooked;
+      return `<div class="rr-item ${st[0]}"><div class="rr-head">${st[1]} ${st[2]}</div>
+        ${m.quote ? `<div class="quote-line">“${esc(m.quote)}”</div>` : ""}
+        <div class="rr-note">${esc(m.note || "")}</div></div>`;
+    }).join("");
+    const partner = rep.partnerFeel ? `
+      <div class="partner-box">
+        <div class="partner-head">🧑 상대는 이렇게 느꼈을 거예요</div>
+        <div class="partner-feel">${esc(rep.partnerFeel)}</div>
+        ${rep.partnerReply ? `<div class="partner-reply">💬 “${esc(rep.partnerReply)}”</div>` : ""}
+      </div>` : "";
+    const principles = (rep.principle || []).map(p =>
+      `<div class="principle-chip"><b>${esc(p.name || "")}</b>${p.id ? ` <span class="pn">#${esc(String(p.id))}</span>` : ""}
+        <div>${esc(p.application || "")}</div></div>`).join("");
+    const fixes = (rep.fixes || []).map(f => `
+      <div class="fb-block fb-surgery"><span class="fb-h">✂️ 이렇게 말했다면</span>
+        ${f.quote ? `<div class="sg before"><span class="sg-tag">전</span>${esc(f.quote)}</div>` : ""}
+        ${f.better ? `<div class="sg after"><span class="sg-tag">후</span>${esc(f.better)}</div>` : ""}
+        ${f.why ? `<div class="sg why">→ ${esc(f.why)}</div>` : ""}</div>`).join("");
+    return `
+      ${rep.oneLine ? `<div class="fb-block fb-now"><span class="fb-h">🗣️ 들은 소감</span>${esc(rep.oneLine)}</div>` : ""}
+      ${partner}
+      <div class="qscore-card">
+        <div class="qscore-head"><span class="qscore-title">${dims === SOCIAL_DIMS ? "사회성 4축" : "말하기 4축"}</span>
+          <span class="qscore-avg">평균 <b>${mean.toFixed(1)}</b> / 5</span></div>
+        ${bars}
+      </div>
+      ${moments ? `<div class="section-label">듣는 동안 무슨 일이 있었나</div>${moments}` : ""}
+      ${fixes}
+      ${principles ? `<div class="section-label">적용된 원리</div><div class="principle-wrap">${principles}</div>` : ""}
+      ${rep.upgrade ? `<div class="fb-block fb-next"><span class="fb-h">⬆️ 한 단계 깊게</span>${esc(rep.upgrade)}</div>` : ""}
+      ${rep.nextAction ? `<div class="fb-block fb-next"><span class="fb-h">➡️ 다음 한 가지</span>${esc(rep.nextAction)}</div>` : ""}`;
+  }
+
   function buildReviewLesson(day) {
     // 최근 다룬 서로 다른 기술 2~3개를 통합하는 과제 생성
     const recent = [];
@@ -539,6 +789,7 @@ ${text}
       category: lesson.category, skill: lesson.skill,
       stage: "brief", submission: "", noticed: "", retry: "",
       revisions: [], revisePass: 0, qualityReport: null, qualityReportFinal: null,
+      speechReport: null,
       aiFeedback: "", aiRetryFeedback: "", summary: "", selfRating: null,
       dim: lesson.dim || "",
       _lesson: lesson.track === "review" ? lesson : null // 복습 레슨은 동적이라 저장
@@ -1322,6 +1573,9 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   function viewFeedback(sess, L) {
     const useAI = aiReady();
     const isQuality = L.track === "quality";
+    const isSpeech = L.track === "speak" || L.track === "social";
+    /* 말하기·사회성 레슨은 전용 스피치 리포트를 1순위로 쓴다 */
+    if (isSpeech) return viewSpeechFeedback(sess, L);
     const observation = localObservation(L, sess.submission);
     const scan = localQualityScan(sess.submission);
     /* 품질 레슨은 독자 리포트를, 구조 레슨은 기술 피드백을 기본으로 한다.
@@ -1375,6 +1629,117 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       <button class="btn ghost small" id="skip-retry">건너뛰고 마무리</button>
     </div>`;
   }
+  /* ---- 말하기·사회성 전용 피드백 화면 ---- */
+  function currentSpeechText(sess) {
+    const revs = sess.revisions || [];
+    return revs.length ? revs[revs.length - 1].text : sess.submission;
+  }
+  function viewSpeechFeedback(sess, L) {
+    const isSocial = L.track === "social";
+    const sc = localSpeechScan(currentSpeechText(sess));
+    const cached = sess.speechReport;
+    const take = sess.revisePass || 0;
+    const total = revisePassCount(L);
+    const slot = cached
+      ? `<div id="sp-fb">${renderSpeechReport(cached, isSocial ? SOCIAL_DIMS : SPEECH_DIMS)}</div>`
+      : (!aiReady()
+        ? `<div class="fb-block fb-improve"><span class="fb-h">${isSocial ? "🧑 상대의 반응" : "🗣️ 청자 리포트"}</span>
+             ${isSocial ? "상대가 어떻게 느꼈을지" : "듣는 사람에게 무슨 일이 일어났는지"}는 기계로 셀 수 없어 AI가 필요해요.
+             설정에서 <b>무료 Gemini 키</b>를 넣으면 받을 수 있습니다.
+             <br><span class="muted small">키가 없어도 아래 발화 지표는 그대로 계산됩니다.</span></div>`
+        : (state.settings.aiSaver
+          ? `<div class="ai-ask-box">
+               <div class="ai-ask-text">${isSocial ? "🧑 <b>상대의 반응</b>을 시뮬레이션할까요?" : "🗣️ <b>청자 리포트</b>를 받아볼까요?"}
+                 <span class="muted" style="font-size:12px">${isSocial ? "체면·경청·주고받기·온기 4축" : "논리·전달·청자조율·안정감 4축"} · 호출 1회 · 오늘 ${todayAIUsage()}회</span></div>
+               <button class="btn btn-secondary small" id="sp-ask" style="margin:0">${isSocial ? "반응 보기" : "리포트 받기"}</button>
+             </div><div id="sp-fb"></div>`
+          : `<div id="sp-fb"><span class="spinner"></span>분석 중…</div>`));
+    return `
+    <div class="session-step">
+      <span class="step-kicker ${L.track}">DAY ${sess.day} · ${take > 0 ? `${take}회차 피드백` : "피드백"}</span>
+
+      <div class="fb-block fb-praise">
+        <span class="fb-h">👏 오늘의 노력</span>
+        ${isRehearsal(L) && take > 0
+          ? `${take}회차까지 반복했어요. 리허설 반복은 1회 발화보다 훨씬 효과가 큽니다.`
+          : "소리 내어 말하고 옮겨 적는 것 자체가 산출 훈련이에요."}
+      </div>
+
+      ${slot}
+
+      <details class="hint-fold" open>
+        <summary>📊 발화 지표 (기기에서 계산 · AI 없이)</summary>
+        ${speechScanHTML(sc)}
+        ${(L.hints || []).slice(0, 2).map(h => `<div class="notice-q">→ ${esc(h)}</div>`).join("")}
+      </details>
+
+      <div class="fb-block" style="background:#f6f7fe;border:1px solid var(--line)">
+        <span class="fb-h" style="color:var(--primary)">${isRehearsal(L) ? "🔁 다음 리허설" : "✏️ 다음 단계"}</span>
+        ${esc(revisePassInfo(L, take + 1).instruction)}
+      </div>
+
+      <button class="btn primary" id="to-retry">${isRehearsal(L) ? `${take + 2}회차 말하기` : "다시 말하기"}</button>
+      <button class="btn ghost small" id="skip-retry">건너뛰고 마무리</button>
+    </div>`;
+  }
+  function wireSpeechFeedback(sess, L) {
+    $("#to-retry").addEventListener("click", () => { sess.stage = "retry"; save(); renderToday(); });
+    $("#skip-retry").addEventListener("click", () => { sess.stage = "wrap"; save(); renderToday(); });
+    const isSocial = L.track === "social";
+    const ask = () => {
+      const prevNote = sess.speechReport && sess.speechReport.nextAction;
+      const cur = currentSpeechText(sess);
+      const msg = isSocial
+        ? socialUserMessage(L, cur, sess.topic)
+        : speechUserMessage(L, cur, (sess.revisePass || 0) + 1, prevNote);
+      requestSpeechReport("sp-fb", isSocial ? SOCIAL_SYSTEM : SPEECH_SYSTEM, msg,
+        isSocial ? SOCIAL_DIMS : SPEECH_DIMS,
+        (rep) => {
+          sess.speechReport = rep; save();
+          recordSpeech(rep, { day: sess.day, lessonId: L.id, track: L.track, take: sess.revisePass || 0 });
+        });
+    };
+    if (sess.speechReport) {
+      const el = $("#sp-fb");
+      if (el) el.innerHTML = renderSpeechReport(sess.speechReport, isSocial ? SOCIAL_DIMS : SPEECH_DIMS);
+    } else {
+      const b = $("#sp-ask");
+      if (b) b.addEventListener("click", ask);
+      else if (aiReady() && !state.settings.aiSaver) ask();
+    }
+  }
+  async function requestSpeechReport(slotId, system, userMsg, dims, onDone) {
+    const slot = $("#" + slotId);
+    if (slot) slot.innerHTML = `<span class="spinner"></span>분석 중…`;
+    try {
+      const raw = await callAI(system, userMsg, 3200, true);
+      const j = extractJSON(raw);
+      if (!j.scores) throw new Error("점수가 없습니다");
+      if (onDone) onDone(j);
+      const s2 = $("#" + slotId);
+      if (s2) s2.innerHTML = renderSpeechReport(j, dims);
+      return j;
+    } catch (e) {
+      const s2 = $("#" + slotId);
+      if (s2) s2.innerHTML = `<span style="color:var(--danger)">분석 실패: ${esc(e.message)}</span>
+        <button class="btn ghost small" id="${slotId}-retry">다시 시도</button>`;
+      const rb = $("#" + slotId + "-retry");
+      if (rb) rb.addEventListener("click", () => requestSpeechReport(slotId, system, userMsg, dims, onDone));
+      return null;
+    }
+  }
+  /* 말하기·사회성 점수 추이 기록 */
+  function recordSpeech(rep, meta) {
+    if (!rep || !rep.scores) return;
+    state.speech = state.speech || [];
+    state.speech.push({
+      date: todayStr(), day: meta && meta.day, lessonId: meta && meta.lessonId,
+      track: meta && meta.track, take: meta && meta.take,
+      scores: rep.scores, oneLine: rep.oneLine || ""
+    });
+    save();
+  }
+
   function qualitySlotHTML(cached) {
     if (cached) return `<div id="q-fb"></div>`;
     if (!aiReady()) {
@@ -1393,6 +1758,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       <div id="q-fb"></div>`;
   }
   function wireFeedback(sess, L) {
+    if (L.track === "speak" || L.track === "social") return wireSpeechFeedback(sess, L);
     $("#to-retry").addEventListener("click", () => { sess.stage = "retry"; save(); renderToday(); });
     $("#skip-retry").addEventListener("click", () => { sess.stage = "wrap"; save(); renderToday(); });
     const askQuality = () => requestQualityReport("q-fb", sess.submission,
@@ -1420,6 +1786,8 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     const total = revisePassCount(L);
     const prev = lastRevisionText(sess);
     const dim = info.focus ? dimOf(info.focus) : null;
+    /* 말하기는 '수정'이 아니라 '리허설 반복' — 같은 주제를 다시 말한다 */
+    if (isRehearsal(L)) return viewRehearsal(sess, L, pass, info, total, dim);
     return `
     <div class="session-step">
       <span class="step-kicker ${L.track}">DAY ${sess.day} · ${pass}차 수정</span>
@@ -1445,25 +1813,85 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       ${aiReady() ? `<div id="ai-retry-slot"></div>` : ""}
     </div>`;
   }
-  /* 회차별 초점 — 품질 레슨은 revisePasses 정의를 쓰고, 없으면 1회(L.retry) */
+  /* 회차별 초점 — 말하기는 takes(리허설), 글쓰기는 revisePasses(수정) */
+  function passSpec(L) { return L.takes || L.revisePasses || null; }
+  function isRehearsal(L) { return !!L.takes; }
+  /* 리허설은 '첫 발화(제출)'가 이미 1회차다. 따라서 takes[0]은 첫 발화의 초점이고,
+     추가 리허설 회차는 takes[1]부터다. 글쓰기 수정은 초고 이후가 1차 수정이라 인덱스가 다르다. */
   function revisePassInfo(L, pass) {
-    const rp = L.revisePasses;
+    const rp = passSpec(L);
+    if (isRehearsal(L)) {
+      if (rp && rp[pass]) return rp[pass];          // pass=1 → takes[1] = 2회차
+      return { focus: L.dim || null, instruction: L.retry || "한 번 더 말해보세요." };
+    }
     if (rp && rp[pass - 1]) return rp[pass - 1];
     if (pass === 1) return { focus: L.dim || null, instruction: L.retry || "피드백을 반영해 고쳐 쓰세요." };
     return { focus: null, instruction: "한 번 더 다듬어 보세요." };
   }
+  /* 추가로 진행할 회차 수 (첫 발화/초고 제외) */
   function revisePassCount(L) {
-    return (L.revisePasses && L.revisePasses.length) || 1;
+    const rp = passSpec(L);
+    if (!rp) return 1;
+    return isRehearsal(L) ? Math.max(1, rp.length - 1) : rp.length;
+  }
+  /* 화면에 보여줄 총 회차 (첫 발화 포함) */
+  function totalTakes(L) {
+    const rp = passSpec(L);
+    return isRehearsal(L) && rp ? rp.length : revisePassCount(L) + 1;
   }
   function lastRevisionText(sess) {
     const revs = sess.revisions || [];
     if (revs.length) return revs[revs.length - 1].text;
     return sess.retry || sess.submission || "";
   }
+  /* ---- 리허설 회차 화면 (말하기) ----
+   * 글쓰기 '수정'과 달리 이전 원고를 고치는 게 아니라, 같은 주제를 처음부터 다시 말한다.
+   * 이전 회차는 접어두고(보고 읽으면 리허설이 아니다), 지표 변화로 성장을 보여준다. */
+  function viewRehearsal(sess, L, pass, info, _total, dim) {
+    const takeNo = pass + 1;                 // 첫 발화가 1회차이므로 +1
+    const total = totalTakes(L);
+    const prevTake = (sess.revisions || [])[ (sess.revisions || []).length - 1 ];
+    const prevText = prevTake ? prevTake.text : sess.submission;
+    const prevScan = localSpeechScan(prevText);
+    return `
+    <div class="session-step">
+      <span class="step-kicker ${L.track}">DAY ${sess.day} · 리허설 ${takeNo}/${total}회차</span>
+      <div class="pass-dots">${Array.from({length: total}, (_, i) =>
+        `<span class="pass-dot ${i + 1 < takeNo ? "done" : i + 1 === takeNo ? "now" : ""}">${i + 1}</span>`).join("")}</div>
+
+      <div class="fb-block fb-next">
+        <span class="fb-h">🔁 ${takeNo}회차 초점 ${dim ? `· ${dim.emoji} ${esc(dim.label)}` : ""}</span>
+        ${esc(info.instruction)}
+        ${dim ? `<div class="sg why">${esc(dim.short)}</div>` : ""}
+      </div>
+
+      ${sess.topic ? `<div class="topic-highlight">🎤 ${esc(sess.topic)}</div>` : ""}
+
+      <div class="rehearse-note">
+        📢 <b>보고 읽지 마세요.</b> 이전 회차는 접어뒀습니다. 다시 소리 내어 말한 뒤 옮겨 적으세요 —
+        반복해서 <b>말하는 것</b>이 실력을 만듭니다.
+      </div>
+
+      <details class="hint-fold">
+        <summary>직전 회차 보기 (${prevScan.chars}자 · 채움말 ${prevScan.fillers}회)</summary>
+        <div class="ai-answer" style="margin:8px 0">${esc(prevText)}</div>
+      </details>
+
+      ${L.speak ? viewTimer(L) : ""}
+
+      <label style="margin-top:14px">🎙️ ${takeNo}회차 발화를 옮겨 적기
+        <textarea id="retry-text" rows="8" placeholder="다시 말한 내용을 옮겨 적으세요"></textarea>
+      </label>
+      <div class="char-count" id="retry-count">0자</div>
+      <button class="btn primary" id="retry-submit">${takeNo < total ? `${takeNo}회차 제출` : "리허설 완료"}</button>
+    </div>`;
+  }
+
   function wireRetry(sess, L) {
     const ta = $("#retry-text"), cc = $("#retry-count");
     const upd = () => { cc.textContent = charLen(ta.value) + "자"; };
     ta.addEventListener("input", upd); upd();
+    if (isRehearsal(L) && L.speak && $("#tm-start")) setupTimer();
     $("#retry-submit").addEventListener("click", () => {
       const text = ta.value.trim();
       if (charLen(text) < 5) { alert("고쳐 쓴 내용을 조금 더 적어 주세요."); return; }
@@ -1473,7 +1901,13 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       sess.revisions.push({ pass, focus: info.focus || "", text: text });
       sess.retry = text;              // 기록 호환
       sess.revisePass = pass;
-      sess.stage = pass < revisePassCount(L) ? "revise-more" : "wrap";
+      if (isRehearsal(L)) {
+        // 리허설은 매 회차마다 피드백을 받고 다음 회차로 간다
+        sess.speechReport = null;     // 새 회차는 새로 평가
+        sess.stage = pass < revisePassCount(L) ? "feedback" : "wrap";
+      } else {
+        sess.stage = pass < revisePassCount(L) ? "revise-more" : "wrap";
+      }
       save(); renderToday();
     });
   }
@@ -1535,6 +1969,29 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
         (${diff >= 0 ? "+" : ""}${diff.toFixed(1)})
       </div>`;
     }
+    /* 리허설(말하기)은 회차별 지표 변화로 성장을 보여준다 */
+    if (isRehearsal(L) && (sess.revisions || []).length) {
+      const takes = [{ text: sess.submission }].concat(sess.revisions);
+      const rows = takes.map((t, i) => {
+        const s = localSpeechScan(t.text);
+        return `<tr><td>${i + 1}회차</td><td>${s.chars}자</td><td>${s.fillers}회</td>
+          <td>${s.signposts}회</td><td>${s.meanLen}자</td><td>${esc(s.conclusion)}</td></tr>`;
+      }).join("");
+      const first = localSpeechScan(takes[0].text), last = localSpeechScan(takes[takes.length - 1].text);
+      const dF = last.fillers - first.fillers, dS = last.signposts - first.signposts;
+      return viewWrapBody(sess, L, `
+        <div class="section-label">🔁 리허설 회차별 변화</div>
+        <div class="take-table-wrap"><table class="take-table">
+          <thead><tr><th>회차</th><th>분량</th><th>채움말</th><th>신호어</th><th>평균문장</th><th>결론</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>
+        <div class="fb-block ${dF <= 0 && dS >= 0 ? "fb-praise" : "fb-improve"}">
+          <span class="fb-h">📈 1회차 → ${takes.length}회차</span>
+          채움말 ${first.fillers}→${last.fillers}회 (${dF > 0 ? "+" : ""}${dF}) ·
+          신호어 ${first.signposts}→${last.signposts}회 (${dS > 0 ? "+" : ""}${dS}) ·
+          결론 위치 ${esc(first.conclusion)} → ${esc(last.conclusion)}
+          <div class="sg why">반복해서 말할수록 채움말이 줄고 구조가 잡히는 것이 정상입니다.</div>
+        </div>`);
+    }
     const compareBlock = revised ? `
       <div class="section-label">🔍 초고와 최종본 비교 <span class="muted">(수정이 만든 차이)</span></div>
       ${renderDiffPair("초고", sess.submission, "최종본", final)}
@@ -1547,11 +2004,16 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
         </div>
         <div id="q-final"></div>` : `<div id="q-final"></div>`}
     ` : "";
+    return viewWrapBody(sess, L, compareBlock);
+  }
+  /* 마무리 화면의 공통 부분 (비교 블록만 트랙별로 다르다) */
+  function viewWrapBody(sess, L, compareBlock) {
+    const isSpeech = L.track === "speak" || L.track === "social";
     return `
     <div class="session-step">
       <span class="step-kicker ${L.track}">DAY ${sess.day} · 마무리</span>
 
-      ${compareBlock}
+      ${compareBlock || ""}
 
       <div class="section-label">오늘 이 기술, 얼마나 익혔나요? <span class="muted">(다음 과제 난이도 조절에 쓰여요)</span></div>
       <div class="timer-controls" style="justify-content:stretch; gap:8px; margin-top:8px">
@@ -1562,7 +2024,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       <p class="notify-status" id="rate-status"></p>
 
       <div class="section-label" style="margin-top:18px">오늘 배운 것을 한 문장으로 <span class="muted">(인출 연습 — 직접 말해봐야 남아요)</span></div>
-      <textarea id="wrap-summary" rows="2" placeholder="예: 핵심 주장을 문단 맨 앞에 두면 글이 또렷해진다">${esc(sess.summary)}</textarea>
+      <textarea id="wrap-summary" rows="2" placeholder="${isSpeech ? "예: 결론을 먼저 말하면 청자가 끝까지 따라온다" : "예: 핵심 주장을 문단 맨 앞에 두면 글이 또렷해진다"}">${esc(sess.summary)}</textarea>
 
       <button class="btn primary" id="finish-session">세션 마무리</button>
     </div>`;
