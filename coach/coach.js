@@ -88,11 +88,12 @@
       preset: "balanced",     // 트랙 프리셋 (balanced|speaking|social|writing)
       drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
       aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
-      train: { daily: null, log: {}, xp: 0, correct: 0, total: 0 },  // 매일 훈련 진행
+      train: { daily: null, log: {}, xp: 0, correct: 0, total: 0, generated: [], gen: null },  // 매일 훈련 진행
       settings: {
         aiEnabled: false,
         aiSaver: true,        // 절약 모드: AI 피드백을 탭할 때만 호출
         autoGenDrills: true,  // 안목 훈련 문제를 하루 1회 자동 생성
+        autoGenTrain: true,    // 매일 훈련 mcq 문제도 하루 1회 자동 생성
         provider: "gemini",   // 'gemini'(무료) | 'anthropic'(유료)
         gemini: { key: "", model: "gemini-2.5-flash" },
         anthropic: { key: "", model: "claude-sonnet-5" },
@@ -120,6 +121,7 @@
     if (typeof set.aiEnabled !== "boolean") set.aiEnabled = false;
     if (typeof set.aiSaver !== "boolean") set.aiSaver = true;
     if (typeof set.autoGenDrills !== "boolean") set.autoGenDrills = true;
+    if (typeof set.autoGenTrain !== "boolean") set.autoGenTrain = true;
     if (typeof set.dailyBudget !== "number" || set.dailyBudget <= 0) set.dailyBudget = 40;
     if (!set.notify) set.notify = {};
     if (typeof set.notify.enabled !== "boolean") set.notify.enabled = false;
@@ -140,11 +142,12 @@
     if (!s.preset || !TRACK_PRESETS[s.preset]) s.preset = "balanced";
     if (!s.drills) s.drills = { done: [], correct: 0, total: 0 };
     if (!s.aiUsage) s.aiUsage = { date: "", count: 0 };
-    if (!s.train) s.train = { daily: null, log: {}, xp: 0, correct: 0, total: 0 };
+    if (!s.train) s.train = { daily: null, log: {}, xp: 0, correct: 0, total: 0, generated: [], gen: null };
     if (!s.train.log) s.train.log = {};
     if (typeof s.train.xp !== "number") s.train.xp = 0;
     if (typeof s.train.correct !== "number") s.train.correct = 0;
     if (typeof s.train.total !== "number") s.train.total = 0;
+    if (!Array.isArray(s.train.generated)) s.train.generated = [];
     if (!set.provider) set.provider = "gemini";
     if (!set.gemini) set.gemini = { key: "", model: "gemini-2.5-flash" };
     if (!set.anthropic) set.anthropic = { key: set.apiKey || "", model: set.model || "claude-sonnet-5" };
@@ -2974,6 +2977,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     $("#set-ai-enabled").checked = !!state.settings.aiEnabled;
     $("#set-ai-saver").checked = !!state.settings.aiSaver;
     $("#set-autogen").checked = !!state.settings.autoGenDrills;
+    $("#set-autogen-train").checked = !!state.settings.autoGenTrain;
     $("#set-daily-budget").value = state.settings.dailyBudget || 40;
     renderUsageBar();
   }
@@ -3016,6 +3020,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       state.settings.aiEnabled = $("#set-ai-enabled").checked;
       state.settings.aiSaver = $("#set-ai-saver").checked;
       state.settings.autoGenDrills = $("#set-autogen").checked;
+      state.settings.autoGenTrain = $("#set-autogen-train").checked;
       const budget = parseInt($("#set-daily-budget").value, 10);
       state.settings.dailyBudget = budget > 0 ? budget : 40;
       save();
@@ -3377,6 +3382,7 @@ ${text}
     if (practiceMode === "train") {
       root.innerHTML = segmentHTML() + viewTrain();
       wireSegments(); wireTrain();
+      maybeAutoGenerateTrain();
     } else if (practiceMode === "study") {
       root.innerHTML = segmentHTML() + viewStudy();
       wireSegments(); wireStudy();
@@ -3420,7 +3426,8 @@ ${text}
 
   function trainPool() {
     const m = currentMode();
-    return TRAIN_ITEMS.filter(it => m === "both" || it.mode === m);
+    const all = TRAIN_ITEMS.concat((state.train && state.train.generated) || []);
+    return all.filter(it => m === "both" || it.mode === m);
   }
   /* 오늘의 세트 — 복습 대상(틀렸던 것) 먼저, 그다음 새 문항.
      기술이 한쪽으로 쏠리지 않게 같은 기술은 최대 2문항까지만 담는다. */
@@ -3519,7 +3526,7 @@ ${text}
         <h2 style="margin-bottom:6px">🏋️ 매일 훈련 <span class="sub">하루 ${TRAIN_SET_SIZE}문항 · 5분</span></h2>
         <p class="practice-intro">긴 과제 하나보다, 좁은 기술을 짧게 여러 번 반복할 때 실력이 빨리 붙습니다.
         틀린 문항은 며칠 뒤에 다시 나옵니다.
-        <span class="muted" style="font-size:12px">· AI 호출 없음 · ⚡${xp} XP${state.train.total ? ` · 정답률 ${acc}%` : ""}</span></p>
+        <span class="muted" style="font-size:12px">· 채점은 항상 API 0원 · ⚡${xp} XP${state.train.total ? ` · 정답률 ${acc}%` : ""}</span></p>
         <div class="daily-bar">
           <div class="daily-head">
             <span>📅 오늘의 훈련 <b>${doneN}/${totalN}</b></span>
@@ -3527,6 +3534,7 @@ ${text}
           </div>
           <div class="daily-track"><span class="daily-fill" style="width:${totalN ? doneN / totalN * 100 : 0}%"></span></div>
         </div>
+        ${trainGenHTML()}
       </div>`;
     // 방금 채점한 문항은 해설을 먼저 보여준다. (채점 즉시 solved에 들어가므로
     // 이 분기가 없으면 정답 해설을 못 보고 다음 문항으로 건너뛴다)
@@ -3636,6 +3644,8 @@ ${text}
       // 오늘 세트를 다 풀었어도 더 하고 싶으면 새 세트를 뽑아준다
       state.train.daily = null; save(); trainCur = null; renderPractice(); window.scrollTo(0, 0);
     });
+    const gen = $("#gen-train");
+    if (gen) gen.addEventListener("click", () => generateTrainItems(true));
     if (!trainCur) return;
     const cur = trainCur, it = cur.item;
 
@@ -3682,6 +3692,161 @@ ${text}
     });
     const nx = $("#train-next");
     if (nx) nx.addEventListener("click", () => { trainNext(); renderPractice(); window.scrollTo(0, 0); });
+  }
+
+  function trainGenHTML() {
+    if (!aiReady()) {
+      return `<p class="muted" style="font-size:12px; margin-top:8px">💡 설정에서 무료 Gemini 키를 넣으면
+        매일 <b>정답률이 낮은 기술을 겨냥한 새 문제</b>가 자동으로 추가돼요(하루 1회 호출).</p>`;
+    }
+    const g = state.train.gen || {};
+    const generatedToday = g.date === todayStr();
+    const weak = weakestTrainSkill();
+    const wk = weak ? TRAIN_SKILLS[weak] : null;
+    return `
+      <div class="gen-row" style="margin-top:10px">
+        <span class="gen-text">${generatedToday
+          ? `✨ 오늘 새 문제 <b>${g.count || 0}개</b>를 추가했어요.`
+          : `✨ 새 문제 만들기 ${wk ? `<span class="muted">(약점: ${wk.emoji} ${esc(wk.label)})</span>` : ""}`}</span>
+        <button class="btn ghost small" id="gen-train" style="margin:0">${generatedToday ? "더 만들기" : "생성 (호출 1회)"}</button>
+      </div>
+      <p id="train-gen-status" class="notify-status"></p>`;
+  }
+
+  /* ==================== 매일 훈련 AI 자동 생성 ====================
+   * rewrite/order/fill은 채점 규칙이나 정답 순서를 AI가 직접 짜야 해서,
+   * AI를 신뢰할 수 없는 부분(정규식·순열)이 생긴다. 그래서 자동 생성은
+   * 검증하기 쉬운 mcq(보기+정답 번호)로만 한정한다. 나머지 타입은
+   * 사람이 손으로 짠 것만 쓴다 — 안 만드는 것이 잘못 만드는 것보다 낫다. */
+  function weakestTrainSkill() {
+    const pool = trainPool();
+    const skills = Object.keys(TRAIN_SKILLS).filter(k => {
+      const m = currentMode();
+      return (m === "both" || TRAIN_SKILLS[k].mode === m) && pool.some(it => it.skill === k);
+    });
+    if (!skills.length) return null;
+    const stats = skills.map(k => {
+      const items = pool.filter(it => it.skill === k);
+      let attempts = 0, wrongRate = 0;
+      items.forEach(it => {
+        const lg = trainLog(it.id);
+        if (lg.seen) { attempts++; if (lg.streak === 0) wrongRate++; }
+      });
+      return { key: k, n: items.length, unseenBias: attempts ? wrongRate / attempts : 0.5, attempts: attempts };
+    });
+    stats.sort((a, b) => b.unseenBias - a.unseenBias || a.n - b.n);
+    return stats[0].key;
+  }
+
+  const TRAIN_GEN_SYSTEM = `당신은 한국어 말하기·글쓰기 훈련용 객관식 문제를 만드는 출제자입니다.
+학습자는 상황을 읽고 보기 중 가장 나은 선택을 고른 뒤 해설을 읽으며 습관을 교정합니다.
+
+## 문제의 질을 결정하는 조건 (반드시 지킬 것)
+1. 정답이 **명확**해야 합니다. 전문가 열 명이 보면 열 명이 같은 답을 골라야 합니다.
+2. 오답도 **그럴듯해야** 합니다. 실제로 사람들이 흔히 하는 실수여야지, 일부러 이상하게 만들지 마세요.
+3. 상황(context)은 구체적인 장면 하나로 좁히세요. "회사에서", "친구랑" 같은 막연한 설정 금지.
+4. 보기는 2~4개, 하나는 반드시 정답입니다.
+5. 해설(why)은 왜 정답이 더 나은지 **이론적 이유**를 담아 2~3문장으로 쓰세요.
+6. tip은 외워서 쓸 수 있는 한 문장 원칙으로.
+7. 매 문제마다 소재를 다르게 하세요. 뻔한 예시(예: "회의에서 발표할 때") 반복 금지.
+
+## 아래 JSON만 출력 (코드블록·설명·인사말 금지)
+{"items":[
+  {"context":"상황 한 문장 (없으면 생략 가능)","prompt":"질문","options":["보기1","보기2","보기3"],
+   "answer":0,"why":"왜 이게 정답인지 이론적 이유","tip":"기억할 원칙 한 문장"}
+]}
+answer는 정답 보기의 0부터 시작하는 인덱스입니다.
+
+## JSON 형식 주의 (반드시)
+- 값 안에 큰따옴표(")를 쓰지 마세요.
+- 값 안에서 줄바꿈하지 마세요.
+- 마지막 항목 뒤에 콤마를 붙이지 마세요.`;
+
+  function trainGenUserMessage(skillKey, n) {
+    const sk = TRAIN_SKILLS[skillKey] || { label: skillKey };
+    const examples = TRAIN_ITEMS.filter(it => it.skill === skillKey && it.type === "mcq").slice(0, 2)
+      .map(it => `- 상황: ${it.context || "(없음)"}\n  질문: ${it.prompt}\n  정답: ${it.options[it.answer]}`).join("\n");
+    const usedPrompts = trainPool().filter(it => it.skill === skillKey).map(it => it.prompt).slice(0, 20);
+    return `[겨냥할 기술] ${sk.label} (${skillKey})
+
+[이 기술의 기존 문제 예시 — 형식과 난이도 기준. 내용은 절대 반복하지 말 것]
+${examples || "(아직 예시 없음)"}
+
+[이미 나온 질문들 — 겹치지 않게]
+${usedPrompts.join(" / ")}
+
+${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 기술의 새 객관식 문제 ${n}개를 위 조건에 맞춰 JSON으로 출제하세요. 소재를 서로 다르게 하세요.`;
+  }
+
+  function validateGenTrainItem(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const prompt = String(raw.prompt || "").trim();
+    const why = String(raw.why || "").trim();
+    if (!prompt || !why || why.length < 15) return null;
+    const options = Array.isArray(raw.options) ? raw.options.map(o => String(o || "").trim()).filter(Boolean) : [];
+    if (options.length < 2 || options.length > 4) return null;
+    const answer = Number(raw.answer);
+    if (!Number.isInteger(answer) || answer < 0 || answer >= options.length) return null;
+    if (new Set(options).size !== options.length) return null;   // 보기 중복
+    const dup = trainPool().some(it => it.prompt === prompt);
+    if (dup) return null;
+    return {
+      id: "tg-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6),
+      mode: TRAIN_SKILLS[raw._skill].mode, skill: raw._skill, type: "mcq",
+      context: raw.context ? String(raw.context).trim() : undefined,
+      prompt: prompt, options: options, answer: answer, why: why,
+      tip: raw.tip ? String(raw.tip).trim() : undefined, ai: true
+    };
+  }
+
+  let _trainGenRunning = false;
+  async function generateTrainItems(manual) {
+    if (_trainGenRunning || !aiReady()) return 0;
+    _trainGenRunning = true;
+    // 매번 새로 조회한다 — 캐시해두면 이 함수가 await로 쉬는 동안 다른 렌더가
+    // #practice-root를 통째로 새로 그려서, 들고 있던 참조가 화면에서 이미 떨어져
+    // 나간 옛 노드를 가리키게 될 수 있다(그러면 값을 바꿔도 화면엔 반영 안 됨).
+    const setStatusEl = (msg, cls) => { const el = $("#train-gen-status"); if (el) { el.textContent = msg; el.className = "notify-status " + (cls || ""); } };
+    setStatusEl("새 문제를 만들고 있어요…", "");
+    const skill = weakestTrainSkill();
+    let added = 0;
+    try {
+      if (!skill) throw new Error("대상 기술을 찾을 수 없어요");
+      const raw = await callAI(TRAIN_GEN_SYSTEM, trainGenUserMessage(skill, 6), 2800, true);
+      const j = extractJSON(raw);
+      const list = Array.isArray(j.items) ? j.items : [];
+      state.train.generated = state.train.generated || [];
+      list.forEach(item => {
+        item._skill = skill;
+        const v = validateGenTrainItem(item);
+        if (v) { state.train.generated.push(v); added++; }
+      });
+      const t = todayStr();
+      const g = state.train.gen || {};
+      state.train.gen = { date: t, count: (g.date === t ? (g.count || 0) : 0) + added };
+      // 방금 만든 문제를 오늘의 세트에도 바로 섞어 넣는다 — 안 그러면 며칠 뒤에나 만날 수 있다
+      if (added && state.train.daily && state.train.daily.date === t) {
+        const fresh = state.train.generated.slice(-added).map((x) => x.id);
+        state.train.daily.ids = state.train.daily.ids.concat(fresh);
+      }
+      save();
+      setStatusEl(
+        added ? `새 문제 ${added}개를 추가했어요. (검증 통과 ${added}/${list.length})` : "쓸 만한 문제가 나오지 않아 저장하지 않았어요.",
+        added ? "ok" : "err"
+      );
+      if (added && manual) renderPractice();
+    } catch (e) {
+      setStatusEl("생성 실패: " + e.message, "err");
+    }
+    _trainGenRunning = false;
+    return added;
+  }
+  /* 하루 1회 자동 생성 — 훈련 탭을 처음 열 때 조용히 돈다 */
+  function maybeAutoGenerateTrain() {
+    if (!aiReady() || !state.settings.autoGenTrain) return;
+    const g = state.train.gen || {};
+    if (g.date === todayStr()) return;
+    generateTrainItems(false).then((n) => { if (n) renderPractice(); });
   }
 
   /* ==================== 썰 해부 (API 0원) ====================
