@@ -2,7 +2,7 @@
    캐시 전략: "네트워크 우선" — 온라인이면 항상 최신 파일, 오프라인이면 저장본 사용.
    (예전엔 캐시 우선이라, 홈 화면에 설치해 거의 안 닫는 아이폰 앱에서는
    서버에 새 버전을 올려도 화면이 몇 주씩 갱신되지 않는 문제가 있었다.) */
-const CACHE = "coach-v17";
+const CACHE = "coach-v18";
 const ASSETS = [
   "./",
   "./index.html",
@@ -109,15 +109,16 @@ async function maybeNotifyInBackground() {
 /* ===== 진짜 푸시 수신 — 앱이 완전히 닫혀 있어도 이 이벤트는 실행된다 ===== */
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
-    let data = { title: "✍️ 오늘의 코칭 세션", body: "오늘의 글쓰기·말하기 과제가 기다리고 있어요." };
+    let data = { title: "✍️ 오늘의 코칭 세션", body: "오늘의 글쓰기·말하기 과제가 기다리고 있어요.", slot: "morning" };
     try { if (event.data) data = event.data.json(); } catch (e) { /* 형식이 다르면 기본 문구 사용 */ }
-    // 밤 알림(스트릭 경고)은 오늘 이미 세션을 했으면 잔소리 대신 칭찬으로 바꿔서 보여준다
-    if (data.slot === "evening" && data.praise) {
-      try {
-        const stored = await idbGet("notify");
-        if (stored && stored.today === todayStr() && stored.doneToday) data = data.praise;
-      } catch (e) { /* 기록을 못 읽으면 원래 메시지 그대로 */ }
-    }
+    // 서버는 오늘 세션 여부를 모른다 — 폰에 저장된 기록으로만 판단할 수 있다.
+    let doneToday = false;
+    try {
+      const stored = await idbGet("notify");
+      doneToday = !!(stored && stored.today === todayStr() && stored.doneToday);
+    } catch (e) { /* 못 읽으면 안 한 것으로 취급 — 과잉 알림이 무알림보다 낫다 */ }
+    if (data.slot === "morning" && doneToday) return;   // 아침엔 이미 했으면 조용히 넘어간다
+    if (data.slot === "evening" && doneToday && data.praise) data = data.praise;   // 저녁엔 잔소리 대신 칭찬
     await self.registration.showNotification(data.title, {
       body: data.body, icon: "icon-192.png", badge: "icon-192.png", tag: "coach-" + (data.slot || "push")
     });
