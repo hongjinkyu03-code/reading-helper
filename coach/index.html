@@ -192,6 +192,31 @@
         <p id="ai-status" class="notify-status"></p>
       </div>
 
+      <div class="card">
+        <h2>⏰ 학습 알림 <span class="sub">하루 2번</span></h2>
+        <p class="muted small">
+          정해둔 시각에 오늘 세션 여부를 확인해서, 안 했으면 독촉을, 이미 했으면 칭찬을 보내요.
+          아침엔 하루를 권유하고, 저녁엔 연속 기록이 끊기기 전에 마지막으로 알려줘요.
+        </p>
+        <label>아침 알림 <input type="time" id="notify-morning" value="09:00"></label>
+        <label>저녁 알림 <input type="time" id="notify-evening" value="20:30"></label>
+        <button class="btn primary" id="notify-toggle">알림 켜기</button>
+        <button class="btn ghost small" id="notify-test">미리 보기</button>
+        <p id="notify-status" class="notify-status"></p>
+        <hr class="soft" style="margin:14px 0">
+        <p class="muted small">
+          <b>📲 진짜 푸시 알림</b> — 위 방식은 앱(탭)이 켜져 있어야 동작해요.
+          앱을 완전히 닫아도 받으려면, 홈 화면에 설치한 뒤 아래 버튼을 누르고
+          나온 코드를 저(클로드)에게 붙여넣어 주세요. 발송 인프라를 마저 연결해드릴게요.
+        </p>
+        <button class="btn ghost small" id="push-subscribe">푸시 알림 연결하기</button>
+        <div id="push-result" hidden>
+          <textarea id="push-json" readonly rows="4" style="margin-top:8px"></textarea>
+          <button class="btn ghost small" id="push-copy">📋 코드 복사</button>
+        </div>
+        <p id="push-status" class="notify-status"></p>
+      </div>
+
       <div class="card" id="install-card">
         <h2>📱 아이폰 홈 화면에 설치</h2>
         <p class="muted small">사파리에서 <b>공유 → 홈 화면에 추가</b>를 하면 전체화면 앱으로 쓸 수 있어요.</p>

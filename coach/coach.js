@@ -86,7 +86,12 @@
         autoGenDrills: true,  // 안목 훈련 문제를 하루 1회 자동 생성
         provider: "gemini",   // 'gemini'(무료) | 'anthropic'(유료)
         gemini: { key: "", model: "gemini-2.5-flash" },
-        anthropic: { key: "", model: "claude-sonnet-5" }
+        anthropic: { key: "", model: "claude-sonnet-5" },
+        notify: {
+          enabled: false,
+          morning: "09:00", evening: "20:30",   // 듀오링고식 하루 2회 — 아침 권유 + 저녁 스트릭 경고
+          lastMorning: "", lastEvening: ""       // 'YYYY-MM-DD' — 오늘 이미 보냈는지
+        }
       }
     };
   }
@@ -107,6 +112,12 @@
     if (typeof set.aiSaver !== "boolean") set.aiSaver = true;
     if (typeof set.autoGenDrills !== "boolean") set.autoGenDrills = true;
     if (typeof set.dailyBudget !== "number" || set.dailyBudget <= 0) set.dailyBudget = 40;
+    if (!set.notify) set.notify = {};
+    if (typeof set.notify.enabled !== "boolean") set.notify.enabled = false;
+    if (!set.notify.morning) set.notify.morning = "09:00";
+    if (!set.notify.evening) set.notify.evening = "20:30";
+    if (typeof set.notify.lastMorning !== "string") set.notify.lastMorning = "";
+    if (typeof set.notify.lastEvening !== "string") set.notify.lastEvening = "";
     if (!s.plan) s.plan = {};
     if (!s.focusWhy) s.focusWhy = {};
     if (!s.recommendCats) s.recommendCats = [];
@@ -2505,6 +2516,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     else if (state.lastCompletedDate === dateNDaysAgo(1)) state.streak += 1;
     else state.streak = 1;
     state.lastCompletedDate = t;
+    syncNotifyToIdb();  // 오늘 이미 했다는 사실을 백그라운드 알림도 알 수 있게 즉시 복사
   }
 
   /* ------------------------ 주간 리뷰 ------------------------ */
@@ -3412,11 +3424,12 @@ ${text}
       const hist = rp.history.slice(0, -1);
       const raw = await callAI(ROLEPLAY_SYSTEM, roleplayUserMessage(scene, hist, text), 700);
       const p = parseRoleplay(raw);
-      rp.history.push({ role: "them", text: p.say, coach: p.coach });
-      // 직전 학습자 턴에 코치 관찰을 붙인다
+      // 코치 관찰은 '학습자가 방금 한 말'에 대한 평가이므로 직전 user 턴에만 붙인다.
+      // (상대 turn에도 붙이면 복기 화면에서 같은 문장이 두 번 나온다)
       for (let i = rp.history.length - 1; i >= 0; i--) {
         if (rp.history[i].role === "user") { rp.history[i].coach = p.coach; break; }
       }
+      rp.history.push({ role: "them", text: p.say });
       rp.mood = MOOD_UI[p.mood] ? p.mood : "neutral";
       save(); renderPractice();
     } catch (e) {
@@ -4103,6 +4116,191 @@ ${ap.response}
     window.scrollTo(0, 0);
   }
 
+  /* ============================ 학습 알림 (듀오링고식 스트릭 독촉) ============================
+   * 하루 2회(아침 권유 · 저녁 경고) — 오늘 이미 세션을 했으면 잔소리 대신 칭찬으로 바뀐다.
+   * 두 갈래로 동작한다:
+   *  1) 앱/탭이 켜져 있는 동안(백그라운드 포함) 30초마다 시간을 확인해 로컬 알림을 띄운다.
+   *     안드로이드는 periodicSync로 완전히 닫혀 있어도 이 방식이 가끔 동작한다.
+   *  2) '진짜 푸시' — 아이폰 홈 화면 앱(iOS 16.4+)처럼 앱이 완전히 닫혀 있어도
+   *     서버가 보낸 push를 그대로 받는 방식. 구독까지는 이 앱이 만들지만,
+   *     실제로 하루 두 번 그 구독에 push를 '보내는' 쪽(cron)은 별도 인프라가 필요해서
+   *     아래 구독 코드를 클로드에게 전달해야 마지막 연결이 끝난다. */
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open("coachdb", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("kv");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  function idbSet(key, value) {
+    return idbOpen().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(value, key);
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    }));
+  }
+  function idbGet(key) {
+    return idbOpen().then(db => new Promise((resolve, reject) => {
+      const req = db.transaction("kv").objectStore("kv").get(key);
+      req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+    }));
+  }
+  // 서비스 워커(백그라운드)는 localStorage를 못 읽으므로, 알림 판단에 필요한 값만 복사해 둔다
+  function syncNotifyToIdb() {
+    idbSet("notify", {
+      settings: state.settings.notify,
+      streak: state.streak,
+      doneToday: !!state.activity[todayStr()],
+      today: todayStr()
+    }).catch(() => {});
+  }
+
+  async function setupPeriodicSync() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if ("periodicSync" in reg) {
+        await reg.periodicSync.register("coach-daily-reminder", { minInterval: 60 * 60 * 1000 });
+      }
+    } catch (e) { /* 미지원 브라우저나 권한 없음 — 앱이 열려 있을 때 방식으로만 동작 */ }
+  }
+
+  /* 오늘 이미 세션을 했으면 아침 알림은 건너뛰고, 저녁 알림은 잔소리 대신 칭찬으로 바뀐다 */
+  function buildNotification(slot) {
+    const doneToday = !!state.activity[todayStr()];
+    const streak = state.streak || 0;
+    if (slot === "morning") {
+      if (doneToday) return null;
+      return {
+        title: streak > 0 ? `🔥 ${streak}일째 연속 학습 중!` : "✍️ 오늘의 코칭 세션",
+        body: state.goals ? `“${state.goals}” — 오늘 5분만 투자해볼까요?` : "오늘의 글쓰기·말하기 과제가 기다리고 있어요."
+      };
+    }
+    if (doneToday) {
+      return { title: `✅ 오늘도 완료! ${streak}일 연속`, body: "내일도 이 페이스 그대로 가봐요." };
+    }
+    return {
+      title: streak > 0 ? `⚠️ ${streak}일 연속 기록이 끊기기 직전이에요` : "🌙 오늘 아직 세션 전이에요",
+      body: "자기 전에 딱 한 세션만 — 5분이면 충분해요."
+    };
+  }
+  async function showCoachNotification(slot) {
+    const msg = buildNotification(slot);
+    if (!msg) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(msg.title, { body: msg.body, icon: "icon-192.png", badge: "icon-192.png", tag: "coach-" + slot });
+    } catch (e) { /* 권한이 중간에 바뀌는 등 드문 경우 — 조용히 무시 */ }
+  }
+  function checkNotification() {
+    const n = state.settings.notify;
+    if (!n.enabled) return;
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const now = new Date();
+    const hhmm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+    const t = todayStr();
+    if (hhmm >= n.morning && n.lastMorning !== t) {
+      n.lastMorning = t; save(); syncNotifyToIdb(); showCoachNotification("morning");
+    }
+    if (hhmm >= n.evening && n.lastEvening !== t) {
+      n.lastEvening = t; save(); syncNotifyToIdb(); showCoachNotification("evening");
+    }
+  }
+
+  /* ===== 진짜 푸시 구독 (앱이 닫혀 있어도 수신) =====
+   * 공개키만 클라이언트에 둔다. 실제 발송(cron)은 이 구독 코드를 전달받은 뒤 별도로 연결한다. */
+  const COACH_VAPID_PUBLIC_KEY = "BB0q2NFdDBvBvGfuNdkC4cMrTgp8t8YPoRxooRpJ1-CkXpD4DMPGuFhvaAkAYlDZzPcxkidagM7sGbPAOCzSbCk";
+  function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(base64);
+    return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
+  }
+
+  function updateNotifyUI() {
+    const n = state.settings.notify;
+    const mt = $("#notify-morning"), et = $("#notify-evening"), tog = $("#notify-toggle");
+    if (!mt) return;
+    mt.value = n.morning; et.value = n.evening;
+    if (n.enabled && "Notification" in window && Notification.permission === "granted") {
+      tog.textContent = "알림 끄기";
+      setStatus("#notify-status", `✅ 매일 ${n.morning}·${n.evening} 두 번 알림을 시도해요 (앱이 켜져 있을 때). 완전히 닫혀 있어도 받으려면 아래 '진짜 푸시'를 연결하세요.`, "ok");
+    } else {
+      tog.textContent = "알림 켜기";
+      setStatus("#notify-status", "알림이 꺼져 있어요.", "");
+    }
+  }
+  function wireNotifyOnce() {
+    const tog = $("#notify-toggle");
+    if (!tog) return;
+    tog.addEventListener("click", async () => {
+      if (!("Notification" in window)) { setStatus("#notify-status", "이 브라우저는 알림을 지원하지 않아요.", "err"); return; }
+      const n = state.settings.notify;
+      if (n.enabled) {
+        n.enabled = false;
+      } else {
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          setStatus("#notify-status", "⚠️ 알림이 차단되어 있어요. 기기 설정에서 이 앱의 알림을 허용해 주세요.", "err");
+          return;
+        }
+        n.enabled = true;
+        n.morning = $("#notify-morning").value || "09:00";
+        n.evening = $("#notify-evening").value || "20:30";
+        setupPeriodicSync();
+      }
+      save(); syncNotifyToIdb(); updateNotifyUI();
+    });
+    ["#notify-morning", "#notify-evening"].forEach(sel => {
+      const el = $(sel); if (!el) return;
+      el.addEventListener("change", () => {
+        state.settings.notify.morning = $("#notify-morning").value || "09:00";
+        state.settings.notify.evening = $("#notify-evening").value || "20:30";
+        save(); syncNotifyToIdb(); updateNotifyUI();
+      });
+    });
+    const test = $("#notify-test");
+    if (test) test.addEventListener("click", async () => {
+      if (!("Notification" in window)) { setStatus("#notify-status", "이 브라우저는 알림을 지원하지 않아요.", "err"); return; }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") { setStatus("#notify-status", "⚠️ 알림이 차단되어 있어요.", "err"); return; }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const doneToday = !!state.activity[todayStr()];
+        await reg.showNotification(doneToday ? "✅ 미리보기 — 완료 축하 알림" : "🔥 미리보기 — 스트릭 독촉 알림", {
+          body: doneToday ? "오늘도 완료! 이 페이스 그대로 가봐요." : "오늘 세션 아직이에요. 5분만 투자해볼까요?",
+          icon: "icon-192.png", badge: "icon-192.png", tag: "coach-preview"
+        });
+      } catch (e) {
+        setStatus("#notify-status", "⚠️ 미리보기 표시 실패: " + e.message, "err");
+      }
+    });
+    const sub = $("#push-subscribe");
+    if (sub) sub.addEventListener("click", async () => {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        setStatus("#push-status", "⚠️ 이 브라우저에서는 푸시를 쓸 수 없어요. 아이폰이라면 사파리에서 '홈 화면에 추가'로 설치한 앱에서 눌러주세요. (iOS 16.4 이상)", "err");
+        return;
+      }
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") { setStatus("#push-status", "⚠️ 알림 권한이 거부됐어요. 설정에서 이 앱의 알림을 허용해 주세요.", "err"); return; }
+        const reg = await navigator.serviceWorker.ready;
+        const s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(COACH_VAPID_PUBLIC_KEY) });
+        $("#push-json").value = JSON.stringify(s.toJSON());
+        $("#push-result").hidden = false;
+        setStatus("#push-status", "✅ 구독 생성 완료! 위 코드를 복사해서 클로드에게 붙여넣어 주세요.", "ok");
+      } catch (e) {
+        setStatus("#push-status", "⚠️ 구독 생성 실패: " + e.message, "err");
+      }
+    });
+    const copy = $("#push-copy");
+    if (copy) copy.addEventListener("click", async () => {
+      const ta = $("#push-json"); ta.select();
+      try { await navigator.clipboard.writeText(ta.value); setStatus("#push-status", "📋 복사됐어요! 클로드에게 붙여넣어 주세요.", "ok"); }
+      catch (e) { document.execCommand("copy"); setStatus("#push-status", "📋 복사됐어요! 클로드에게 붙여넣어 주세요.", "ok"); }
+    });
+  }
+
   /* ============================ 아이폰 설치 안내 ============================ */
   function isIOS() {
     return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
@@ -4138,10 +4336,35 @@ ${ap.response}
     save();   // 구버전 설정 이관 결과를 즉시 영구 저장
     wireSettingsOnce();
     wireModeBar();
+    wireNotifyOnce();
     setupInstall();
     renderAll();
+    updateNotifyUI();
+    syncNotifyToIdb();
+    checkNotification();
+    setInterval(checkNotification, 30 * 1000);
+    if (state.settings.notify.enabled) setupPeriodicSync();
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
+      navigator.serviceWorker.register("sw.js").then(async () => {
+        // 백그라운드에서 이미 알림을 보냈다면(IndexedDB에 기록됨) 중복 발송 방지를 위해 반영
+        try {
+          const idbNotify = await idbGet("notify");
+          const n = state.settings.notify;
+          if (idbNotify && idbNotify.settings) {
+            if (idbNotify.settings.lastMorning > n.lastMorning) n.lastMorning = idbNotify.settings.lastMorning;
+            if (idbNotify.settings.lastEvening > n.lastEvening) n.lastEvening = idbNotify.settings.lastEvening;
+            save();
+          }
+        } catch (e) { /* 무시 */ }
+      }).catch(() => {});
+      // 새 버전의 서비스 워커가 제어권을 넘겨받으면 한 번 새로고침해 새 화면을 바로 반영한다.
+      // 홈 화면에 설치해 거의 안 닫는 아이폰 앱에서는 이게 없으면 새 기능이 안 보이는 채로 남는다.
+      let _swRefreshed = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (_swRefreshed) return;
+        _swRefreshed = true;
+        location.reload();
+      });
     }
   }
   document.addEventListener("DOMContentLoaded", init);
