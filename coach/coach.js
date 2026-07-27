@@ -2952,7 +2952,22 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     cfg.key = $("#set-apikey").value.trim();
     cfg.model = $("#set-model").value;
   }
+  /* 실행 중인 sw.js의 CACHE 버전 문자열을 읽어와 보여준다.
+     "no-store"로 받아야 이 요청 자체가 오래된 캐시를 보여주는 일이 없다. */
+  async function loadAppVersion() {
+    const el = $("#app-version");
+    if (!el) return;
+    try {
+      const res = await fetch("sw.js", { cache: "no-store" });
+      const txt = await res.text();
+      const m = txt.match(/CACHE\s*=\s*"([^"]+)"/);
+      el.textContent = m ? m[1] : "확인 불가";
+    } catch (e) {
+      el.textContent = "확인 불가(오프라인)";
+    }
+  }
   function renderSettings() {
+    loadAppVersion();
     uiProvider = state.settings.provider || "gemini";
     $("#set-provider").value = uiProvider;
     refreshProviderUI();
@@ -2971,6 +2986,25 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       : `오늘 ${u.count} / ${u.budget}회 사용 · ${u.remain}회 남음`;
   }
   function wireSettingsOnce() {
+    const fu = $("#force-update");
+    if (fu) fu.addEventListener("click", async () => {
+      setStatus("#update-status", "캐시를 지우고 최신 버전을 받아오는 중…", "");
+      try {
+        if ("caches" in window) {
+          const names = await caches.keys();
+          await Promise.all(names.map((n) => caches.delete(n)));
+        }
+        if ("serviceWorker" in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+        }
+        setStatus("#update-status", "다 지웠어요. 새로고침합니다…", "ok");
+        // 쿼리스트링을 바꿔서 브라우저 자체 HTTP 캐시도 확실히 건너뛴다
+        setTimeout(() => { location.href = location.pathname + "?fresh=" + Date.now(); }, 500);
+      } catch (e) {
+        setStatus("#update-status", "업데이트 실패: " + e.message + " — 홈 화면 아이콘을 지웠다 다시 추가해보세요.", "err");
+      }
+    });
     $("#set-provider").addEventListener("change", () => {
       persistForm(uiProvider);            // 떠나는 제공자에 현재 입력 보존
       uiProvider = $("#set-provider").value;

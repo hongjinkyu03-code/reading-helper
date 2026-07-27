@@ -144,6 +144,17 @@
     <!-- ===================== 설정 탭 ===================== -->
     <section id="tab-settings" class="tab">
       <div class="card">
+        <h2>🔄 앱 버전 <span class="sub">새 기능이 안 보일 때</span></h2>
+        <p class="muted small">
+          홈 화면에 설치한 앱은 새 버전이 나와도 자동으로 안 바뀔 때가 있어요(특히 아이폰).
+          아래 버튼을 누르면 캐시를 지우고 서버의 최신 버전을 강제로 다시 받아옵니다.
+        </p>
+        <p class="muted small">현재 버전: <b id="app-version">-</b></p>
+        <button class="btn primary" id="force-update">지금 업데이트 확인</button>
+        <p id="update-status" class="notify-status"></p>
+      </div>
+
+      <div class="card">
         <h2>🤖 AI 코치 피드백 <span class="sub">선택 · 무료 가능</span></h2>
         <p class="muted small">
           이 앱은 AI 없이도 완전히 동작해요(스스로 발견하는 자기 주목 방식). 여기에 API 키를 넣으면,
