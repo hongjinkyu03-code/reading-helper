@@ -567,3 +567,37 @@ hr.soft{border:none; border-top:1px solid var(--line); margin:14px 0}
 .install-card .btn.primary{margin-top:6px}
 
 @media (max-width:360px){ .skill-group-grid{grid-template-columns:1fr} }
+
+/* ---------- 썰 (구술 서사) ---------- */
+.step-kicker.story{color:#a1478f; background:#fbeef8}
+.tb-story{background:#fbeef8; color:#a1478f}
+.aud-item{border-radius:12px; padding:11px 13px; margin-top:8px; border:1px solid var(--line); background:#fff}
+.aud-head{font-size:12px; font-weight:800; margin-bottom:4px}
+.aud-laugh{background:#eef8f1; border-color:#cdeed9} .aud-laugh .aud-head{color:var(--good)}
+.aud-lean{background:#eef0fd; border-color:#d2cff5} .aud-lean .aud-head{color:var(--primary)}
+.aud-drift{background:#f4f4f7; border-color:#e2e2ea} .aud-drift .aud-head{color:#6b6f86}
+.aud-confused{background:#fff5ec; border-color:#ffddb8} .aud-confused .aud-head{color:var(--warn)}
+.aud-flat{background:#fdf0ee; border-color:#f6d9d3} .aud-flat .aud-head{color:var(--danger)}
+.struct-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px}
+.struct-cell{border-radius:11px; padding:9px 11px; border:1px solid var(--line)}
+.struct-cell.ok{background:#eef8f1; border-color:#cdeed9}
+.struct-cell.warn{background:#fff7ec; border-color:#ffe2b0}
+.sc-label{font-size:11px; font-weight:800; color:var(--muted)}
+.sc-val{font-size:14px; font-weight:800; margin-top:3px}
+
+/* 썰 해부 */
+.study-title{font-size:15px; font-weight:800; margin-bottom:10px}
+.study-ver{border-radius:12px; padding:12px 13px; margin-bottom:10px; border:1px solid var(--line)}
+.study-ver.flat{background:#f4f4f7}
+.study-ver.good{background:#eef8f1; border-color:#cdeed9}
+.sv-head{font-size:12px; font-weight:800; margin-bottom:6px}
+.study-ver.flat .sv-head{color:#6b6f86}
+.study-ver.good .sv-head{color:var(--good)}
+.sv-body{font-size:14.5px; line-height:1.7; white-space:pre-wrap}
+.study-picks{display:flex; flex-wrap:wrap; gap:7px; margin:8px 0 4px}
+.pick-chip{border:1px solid var(--line); background:#fff; border-radius:999px; padding:8px 13px;
+  font-family:inherit; font-size:13px; font-weight:700; color:#40435c; cursor:pointer}
+.pick-chip.on{background:var(--primary); color:#fff; border-color:var(--primary)}
+.study-answer{display:flex; flex-wrap:wrap; gap:7px; margin:8px 0}
+.tag-chip{background:#eef8f1; color:var(--good); border:1px solid #cdeed9; border-radius:999px;
+  padding:6px 12px; font-size:12.5px; font-weight:800}

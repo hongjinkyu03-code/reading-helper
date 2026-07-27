@@ -24,8 +24,12 @@
       pattern: ["write", "quality", "speak", "write", "quality", "speak", "review"]
     },
     speaking: {
-      label: "말하기 중심", desc: "말하기 3 · 사회성 2 · 생각정리(글) 1 · 복습 1",
-      pattern: ["speak", "social", "speak", "quality", "social", "speak", "review"]
+      label: "말하기 중심", desc: "말하기 3 · 사회성 1 · 썰 1 · 생각정리 1 · 복습 1",
+      pattern: ["speak", "social", "speak", "story", "quality", "speak", "review"]
+    },
+    story: {
+      label: "썰·입담", desc: "재밌게 말하기 3 · 말하기 2 · 사회성 1 · 복습 1",
+      pattern: ["story", "speak", "story", "social", "story", "speak", "review"]
     },
     social: {
       label: "사회성 집중", desc: "사회적 말하기와 대화 기술 위주",
@@ -41,8 +45,8 @@
     return p.pattern;
   }
   const TRACK_PATTERN = TRACK_PRESETS.balanced.pattern;   // 하위 호환
-  const TRACK_NAMES = { write: "구조", quality: "품질", speak: "말하기", social: "사회성", review: "복습·통합", diagnostic: "진단" };
-  const TRACK_ICONS = { write: "✍️ 구조", quality: "✨ 품질", speak: "🎙️ 말하기", social: "🤝 사회성", review: "🔁 복습·통합" };
+  const TRACK_NAMES = { write: "구조", quality: "품질", speak: "말하기", social: "사회성", story: "썰", review: "복습·통합", diagnostic: "진단" };
+  const TRACK_ICONS = { write: "✍️ 구조", quality: "✨ 품질", speak: "🎙️ 말하기", social: "🤝 사회성", story: "🎭 썰", review: "🔁 복습·통합" };
 
   /* ----------------------------- 상태 ----------------------------- */
   function defaultState() {
@@ -71,6 +75,7 @@
       speech: [],             // 말하기·사회성 축 추이 [{date, track, scores}]
       roleplay: null,         // 진행 중 롤플레이 대화
       roleplayLog: [],        // 완료한 롤플레이 기록
+      studyDone: [],          // 학습한 썰 해부 편
       anxiety: { level: null, log: [] },  // 발표불안 자기보고 추이
       preset: "balanced",     // 트랙 프리셋 (balanced|speaking|social|writing)
       drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
@@ -109,6 +114,7 @@
     if (!s.quality) s.quality = [];
     if (!s.speech) s.speech = [];
     if (!s.roleplayLog) s.roleplayLog = [];
+    if (!s.studyDone) s.studyDone = [];
     if (!s.anxiety) s.anxiety = { level: null, log: [] };
     if (!s.preset || !TRACK_PRESETS[s.preset]) s.preset = "balanced";
     if (!s.drills) s.drills = { done: [], correct: 0, total: 0 };
@@ -373,16 +379,18 @@
 
   /* ----------------------------- 스케줄러 ----------------------------- */
   /* 구조 트랙(문장·문단·글 전체)과 품질 트랙(개연성·흥미·어휘…)을 함께 굴린다 */
-  const ALL_LESSONS = CURRICULUM.concat(QUALITY_LESSONS, SPEECH_LESSONS, SOCIAL_LESSONS);
+  const ALL_LESSONS = CURRICULUM.concat(QUALITY_LESSONS, SPEECH_LESSONS, SOCIAL_LESSONS, STORY_LESSONS);
   const WRITE_POOL = CURRICULUM.filter(l => l.track === "write");
   /* 말하기 풀 = 기존 curriculum의 speak 레슨 + 새 스피치 레슨(리허설 구조) */
   const SPEAK_POOL = CURRICULUM.filter(l => l.track === "speak").concat(SPEECH_LESSONS);
   const QUALITY_POOL = QUALITY_LESSONS;
   const SOCIAL_POOL = SOCIAL_LESSONS;
-  const POOLS = { write: WRITE_POOL, speak: SPEAK_POOL, quality: QUALITY_POOL, social: SOCIAL_POOL };
+  const STORY_POOL = STORY_LESSONS;
+  const POOLS = { write: WRITE_POOL, speak: SPEAK_POOL, quality: QUALITY_POOL,
+                  social: SOCIAL_POOL, story: STORY_POOL };
   const byId = (id) => ALL_LESSONS.find(l => l.id === id);
   /* 축 조회 — 품질/말하기/사회성 축을 모두 커버 */
-  const ALL_DIMS = QUALITY_DIMS.concat(SPEECH_DIMS, SOCIAL_DIMS);
+  const ALL_DIMS = QUALITY_DIMS.concat(SPEECH_DIMS, SOCIAL_DIMS, STORY_DIMS);
   const dimOf = (key) => ALL_DIMS.find(d => d.key === key);
 
   function trackForDay(day) {
@@ -740,6 +748,68 @@ ${response}
 상대의 반응을 시뮬레이션하고 JSON만 출력하세요.`;
   }
 
+  /* 썰 리포트 — 청중 반응 재생 + 구조 진단 */
+  const AUD_UI = {
+    laugh: ["aud-laugh", "😂", "여기서 터졌어요"],
+    lean: ["aud-lean", "👀", "몸을 기울였어요"],
+    drift: ["aud-drift", "😑", "딴생각이 들었어요"],
+    confused: ["aud-confused", "❓", "못 따라갔어요"],
+    flat: ["aud-flat", "😐", "그냥 지나갔어요"]
+  };
+  function renderStoryReport(rep) {
+    if (!rep || !rep.scores) return "";
+    const bars = STORY_DIMS.map(d => {
+      const v = rep.scores[d.key] || 0;
+      const pct = Math.max(0, Math.min(100, v / 5 * 100));
+      const cls = v <= 2 ? "low" : v === 3 ? "mid" : "high";
+      return `<div class="qbar-row" title="${esc(d.detail)}">
+        <span class="qbar-label">${d.emoji} ${esc(d.label)}</span>
+        <span class="qbar-track"><span class="qbar-fill ${cls}" style="width:${pct}%"></span></span>
+        <span class="qbar-val ${cls}">${v}</span></div>`;
+    }).join("");
+    const vals = STORY_DIMS.map(d => rep.scores[d.key]).filter(v => typeof v === "number");
+    const mean = vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+    const aud = (rep.audience || []).map(a => {
+      const st = AUD_UI[a.type] || AUD_UI.flat;
+      return `<div class="aud-item ${st[0]}"><div class="aud-head">${st[1]} ${st[2]}</div>
+        ${a.quote ? `<div class="quote-line">“${esc(a.quote)}”</div>` : ""}
+        <div class="rr-note">${esc(a.note || "")}</div></div>`;
+    }).join("");
+    const s = rep.structure || {};
+    const cell = (label, val, okVals) => {
+      const ok = (okVals || []).indexOf(val) >= 0;
+      return `<div class="struct-cell ${ok ? "ok" : "warn"}">
+        <div class="sc-label">${esc(label)}</div><div class="sc-val">${esc(val || "-")}</div></div>`;
+    };
+    const fixes = (rep.fixes || []).map(f => `
+      <div class="fb-block fb-surgery"><span class="fb-h">✂️ 이렇게 말했다면</span>
+        ${f.quote ? `<div class="sg before"><span class="sg-tag">전</span>${esc(f.quote)}</div>` : ""}
+        ${f.better ? `<div class="sg after"><span class="sg-tag">후</span>${esc(f.better)}</div>` : ""}
+        ${f.why ? `<div class="sg why">→ ${esc(f.why)}</div>` : ""}</div>`).join("");
+    const noPunch = /없/.test(rep.punchline || "");
+    return `
+      ${rep.oneLine ? `<div class="fb-block fb-now"><span class="fb-h">🎧 청중의 소감</span>${esc(rep.oneLine)}</div>` : ""}
+      ${rep.punchline ? `<div class="fb-block ${noPunch ? "fb-improve" : "fb-praise"}">
+        <span class="fb-h">💥 이 썰의 한 방</span>${esc(rep.punchline)}</div>` : ""}
+      <div class="qscore-card">
+        <div class="qscore-head"><span class="qscore-title">썰 6축</span>
+          <span class="qscore-avg">평균 <b>${mean.toFixed(1)}</b> / 5</span></div>
+        ${bars}
+      </div>
+      ${aud ? `<div class="section-label">🎧 듣는 동안 청중에게 일어난 일</div>${aud}` : ""}
+      ${s.note || s.hook ? `
+        <div class="section-label">🏗️ 구조 진단</div>
+        <div class="struct-grid">
+          ${cell("도입", s.hook, ["있음"])}
+          ${cell("배경", s.background, ["적절"])}
+          ${cell("전개", s.escalation, ["있음"])}
+          ${cell("펀치 위치", s.punchPosition, ["끝"])}
+        </div>
+        ${s.note ? `<p class="muted small" style="margin-top:8px">${esc(s.note)}</p>` : ""}` : ""}
+      ${fixes}
+      ${rep.nextAction ? `<div class="fb-block fb-next"><span class="fb-h">➡️ 다음 회차에 딱 하나</span>${esc(rep.nextAction)}</div>` : ""}`;
+  }
+
   /* 말하기·사회성 리포트 렌더 */
   function renderSpeechReport(rep, dims) {
     if (!rep || !rep.scores) return "";
@@ -792,6 +862,113 @@ ${response}
       ${principles ? `<div class="section-label">적용된 원리</div><div class="principle-wrap">${principles}</div>` : ""}
       ${rep.upgrade ? `<div class="fb-block fb-next"><span class="fb-h">⬆️ 한 단계 깊게</span>${esc(rep.upgrade)}</div>` : ""}
       ${rep.nextAction ? `<div class="fb-block fb-next"><span class="fb-h">➡️ 다음 한 가지</span>${esc(rep.nextAction)}</div>` : ""}`;
+  }
+
+  /* ==================== 썰 코치 (구술 서사) ====================
+   * 재미는 점수로 가르칠 수 없다. 그래서 '청중이 어디서 웃고 어디서 딴생각했는지'를
+   * 재생해준다. 구술 서사 구조(도입-배경-사건-평가-해결)로 어디가 무너졌는지 진단한다. */
+  const STORY_SYSTEM = `당신은 썰(구술 서사)을 듣는 청중이자, 이야기 구조를 아는 코치입니다.
+학습자는 20대 남성 대학생이고, 사소한 일상을 재미있게 푸는 능력을 기르려 합니다.
+
+## 이론 기반 (지적할 때 원리 이름을 밝힐 것)
+1 구술 서사 구조(Labov): 좋은 썰은 도입(예고)-배경(최소)-사건(전개)-평가(왜 말할 가치가 있는지)
+  -해결-여운으로 이뤄진다. 특히 '평가'가 없으면 청자가 '그래서 뭐?'라고 묻는다.
+2 이야기할 가치(tellability): 사건 자체가 아니라 '왜 그게 이상하거나 놀라운지'가 이야기를 만든다.
+3 관여 전략(Tannen): 재연 대사, 역사적 현재형('~하는 거야'), 구체적 디테일, 반복이
+  청자를 장면 안으로 끌어들인다. 요약은 청자를 밖에 세운다.
+4 정보 격차: 결말을 미리 흘리면 들을 이유가 사라진다. 궁금증을 유지하고 마지막에 해소하라.
+5 부조화-해소: 웃음은 기대를 만든 뒤 어긋날 때 생긴다. 어긋남에는 뒤늦은 납득이 있어야 한다.
+6 정점-종점 규칙: 사람은 정점과 마지막을 기억한다. 핵심 단어는 문장 끝에 와야 터진다.
+7 삼단 구성: 두 번 반복해 패턴을 만들고 세 번째에 비튼다.
+8 무해한 위반: 웃음은 '뭔가 잘못됐는데 안전할 때' 생긴다. 남을 깎는 웃음보다 자기를 낮추는
+  웃음이 안전하고 호감을 만든다.
+9 경제성: '늦게 들어가서 일찍 나와라'. 배경이 길거나 펀치 뒤에 설명이 붙으면 죽는다.
+10 낙차: 사소한 사건 + 큰 내적 반응 = 썰. 사건의 크기가 아니라 반응의 크기가 이야기를 만든다.
+
+## 오개념 금지
+- '재미는 타고나는 것'이라는 식의 조언 금지. 모든 지적은 고칠 수 있는 구조·기술로 환원하라.
+- 근거 없는 칭찬 금지. 웃긴 지점은 왜 웃긴지 원리로 설명하라.
+
+## 판단 절차
+1 이 썰의 '한 방'이 무엇인지 한 문장으로 규정한다. 없으면 없다고 판정한다.
+2 청중으로서 처음 듣는다고 가정하고, 문장을 따라가며 반응이 일어난 지점을 표시한다.
+3 구술 서사 구조 중 무너진 칸을 찾는다(도입/배경/사건/평가/해결).
+4 실제 인용으로 근거를 대라. 인용 없는 지적은 버린다.
+5 개선은 딱 2가지. 6 다음에 시도할 것 1가지.
+
+## JSON 형식 주의
+- 값 안에 큰따옴표(")를 쓰지 마세요. 값 안에서 줄바꿈하지 마세요. 마지막 항목 뒤 콤마 금지.
+
+## 아래 JSON만 출력
+{
+ "scores":{"hook":1-5,"tension":1-5,"vivid":1-5,"punch":1-5,"economy":1-5,"involve":1-5},
+ "punchline":"이 썰의 한 방이 무엇인지 한 문장. 없으면 '한 방이 없습니다'라고 쓰고 왜인지 덧붙일 것.",
+ "oneLine":"청중으로서 들은 소감 한 문장. 솔직하게. 재미없으면 재미없다고.",
+ "audience":[{"type":"laugh|lean|drift|confused|flat","quote":"발화의 실제 인용","note":"그 지점에서 청중에게 일어난 일"}],
+ "structure":{"hook":"있음|약함|없음","background":"적절|너무 김|부족","escalation":"있음|평평함","punchPosition":"끝|중간|없음","note":"구조 진단 한두 문장"},
+ "fixes":[{"quote":"원래 발화","better":"이렇게 말했다면","why":"어떤 원리로 더 터지는지"}],
+ "nextAction":"다음 회차에서 시도할 딱 한 가지"
+}
+audience는 3~5개. type의 뜻 — laugh(웃음이 터짐) / lean(몸을 기울임, 궁금해짐) /
+drift(딴생각이 듦) / confused(못 따라감) / flat(반응 없이 지나감).
+점수는 후하게 주지 마세요. 대부분의 첫 시도는 2~3점입니다. 5는 정말 잘 터졌을 때만.`;
+
+  function storyUserMessage(L, transcript, take, prevNote, topic) {
+    const sc = localSpeechScan(transcript);
+    const st = localStoryScan(transcript);
+    const dim = STORY_DIMS.find(d => d.key === L.dim);
+    return `[과제] ${L.skill} — ${L.goal}
+[겨냥하는 축] ${dim ? dim.label + ": " + dim.detail : L.dim || ""}
+[소재] ${topic || "(자유)"}
+[제약] ${(L.constraints || []).join(" / ")}
+${take > 1 ? `[리허설 ${take}회차] 직전 회차의 과제: ${prevNote || "(없음)"}\n이번에 그것이 개선됐는지 먼저 확인하세요.\n` : ""}
+[기계 분석 참고치 — 그대로 나열하지 말고 판단 근거로만]
+글자 ${sc.chars} / 문장 ${sc.sentences}개, 평균 ${sc.meanLen}자
+재연 대사 ${st.quotes}개 / 현재형 어미 ${st.present}회 / 청자 확인 ${st.invite}회 / 쉼 표시 ${st.pauses}개
+채움말 ${sc.fillers}회 / 감정 설명어 ${st.tellEmotion}회(많으면 '설명하고 있다'는 신호)
+
+[학습자의 썰 전사]
+${transcript}
+
+판단 절차 1~6단계를 거쳐 JSON만 출력하세요.`;
+  }
+
+  /* 썰 전용 로컬 스캔 — 재연 대사·현재형·청자 확인·쉼 (API 0원) */
+  function localStoryScan(text) {
+    const t = String(text || "");
+    return {
+      /* 말로 하는 썰의 전사에는 따옴표가 거의 없다.
+       * "내가 드세요 했는데" 처럼 종결어미 뒤에 인용 동사가 붙는 형태(FRAME)와
+       * "뭐랬는지 알아?" 처럼 대사를 예고하는 형태(HERALD)까지 재연 대사로 센다. */
+      quotes: countMatches(t, /['"“”'']([^'"“”'']{2,60})['"“”'']/g) +
+              countMatches(t, /(라고|이러는|그러는|하는)\s*(거야|거예요|더라고|데)/g) +
+              countMatches(t, /(요|다|야|어|지|까|니|래|대|군)\s+(하고|하더|하는\s*거|했는데|했어|했다|그러|이러|그랬|이랬|외치|소리치)/g) +
+              countMatches(t, /뭐랬|뭐라(고|는)\s*(했|하|그)|무슨\s*말(을)?\s*했|하는\s*말이/g),
+      present: countMatches(t, /(는|은)\s*거야|잖아|더라고|(하|되|오|가)는\s*거(야|예요)|는데\s*말이야/g),
+      invite: countMatches(t, /알지\?|알아\?|있잖아|아니야\?|어이없지|그치\?|맞지\?|봐봐/g),
+      pauses: countMatches(t, /\(\s*쉼\s*\)|\.\.\.|…/g),
+      tellEmotion: countMatches(t, /웃겼|재밌었|황당했|어이없었|당황했|민망했|뻘쭘|짜증났|신기했/g),
+      escalators: countMatches(t, /그러다|그러더니|근데\s*이게\s*끝이\s*아니|더\s*웃긴\s*건|심지어/g)
+    };
+  }
+  function storyScanHTML(st, sc) {
+    const row = (emoji, label, value, verdict, good) =>
+      `<div class="scan-row"><span class="scan-k">${emoji} ${label}</span>
+        <span class="scan-v"><b class="${good ? "sv-ok" : "sv-warn"}">${esc(value)}</b></span>
+        <span class="scan-a">${esc(verdict)}</span></div>`;
+    const rows = [];
+    rows.push(row("🎬", "재연 대사", `${st.quotes}개`,
+      st.quotes >= 2 ? "장면이 살아납니다." : "요약 대신 그때 오간 말을 그대로 옮겨보세요.", st.quotes >= 2));
+    rows.push(row("⏱️", "현재형 재연", `${st.present}회`,
+      st.present >= 3 ? "사건을 지금 벌어지는 일처럼 끌어왔어요." : "'~하는 거야/~잖아'로 바꾸면 훨씬 가까워집니다.", st.present >= 3));
+    rows.push(row("🫵", "청자 확인", `${st.invite}회`,
+      st.invite >= 1 ? "청자가 참여할 자리가 있어요." : "'그거 알지?', '어이없지?'로 끌어들여 보세요.", st.invite >= 1));
+    rows.push(row("😐", "감정 설명어", `${st.tellEmotion}회`,
+      st.tellEmotion === 0 ? "감정을 설명하지 않고 보여줬어요." : "'웃겼어/황당했어'는 청자가 느낄 몫입니다. 장면으로 보여주세요.",
+      st.tellEmotion === 0));
+    rows.push(row("🎢", "확대 표지", `${st.escalators}회`,
+      st.escalators >= 1 ? "사건이 계단으로 커집니다." : "'그러더니', '근데 이게 끝이 아니야'로 단계를 만들어보세요.", st.escalators >= 1));
+    return `<div class="scan-table">${rows.join("")}</div>`;
   }
 
   /* ==================== 롤플레이 (멀티턴 대화 시뮬레이션) ====================
@@ -905,6 +1082,10 @@ ${SPEECH_THEORY}
     };
     if (lesson.track === "speak") {
       sess.topic = SPEAK_TOPICS[Math.floor(Math.random() * SPEAK_TOPICS.length)];
+    }
+    if (lesson.track === "story") {
+      // 썰은 '사소한 소재'가 핵심이라 전용 소재 은행에서 뽑는다
+      sess.topic = STORY_TOPICS[Math.floor(Math.random() * STORY_TOPICS.length)];
     }
     state.currentDay = day;
     state.activeSession = sess;
@@ -1541,7 +1722,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   function wireBrief(sess) {
     const L = lessonOf(sess);
     // 말하기는 발화 전 불안 리추얼을 한 번 거친다(회피를 막고 각성을 재해석)
-    const next = (L.track === "speak" && L.speak) ? "ritual" : "write";
+    const next = ((L.track === "speak" || L.track === "story") && L.speak) ? "ritual" : "write";
     $("#to-write").addEventListener("click", () => { sess.stage = next; save(); renderToday(); });
   }
 
@@ -1761,7 +1942,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   function viewFeedback(sess, L) {
     const useAI = aiReady();
     const isQuality = L.track === "quality";
-    const isSpeech = L.track === "speak" || L.track === "social";
+    const isSpeech = L.track === "speak" || L.track === "social" || L.track === "story";
     /* 말하기·사회성 레슨은 전용 스피치 리포트를 1순위로 쓴다 */
     if (isSpeech) return viewSpeechFeedback(sess, L);
     const observation = localObservation(L, sess.submission);
@@ -1824,22 +2005,27 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   }
   function viewSpeechFeedback(sess, L) {
     const isSocial = L.track === "social";
-    const sc = localSpeechScan(currentSpeechText(sess));
+    const isStory = L.track === "story";
+    const cur = currentSpeechText(sess);
+    const sc = localSpeechScan(cur);
+    const stScan = isStory ? localStoryScan(cur) : null;
     const cached = sess.speechReport;
     const take = sess.revisePass || 0;
     const total = revisePassCount(L);
+    const renderRep = (r) => isStory ? renderStoryReport(r)
+      : renderSpeechReport(r, isSocial ? SOCIAL_DIMS : SPEECH_DIMS);
     const slot = cached
-      ? `<div id="sp-fb">${renderSpeechReport(cached, isSocial ? SOCIAL_DIMS : SPEECH_DIMS)}</div>`
+      ? `<div id="sp-fb">${renderRep(cached)}</div>`
       : (!aiReady()
-        ? `<div class="fb-block fb-improve"><span class="fb-h">${isSocial ? "🧑 상대의 반응" : "🗣️ 청자 리포트"}</span>
-             ${isSocial ? "상대가 어떻게 느꼈을지" : "듣는 사람에게 무슨 일이 일어났는지"}는 기계로 셀 수 없어 AI가 필요해요.
+        ? `<div class="fb-block fb-improve"><span class="fb-h">${isStory ? "🎧 청중 반응" : isSocial ? "🧑 상대의 반응" : "🗣️ 청자 리포트"}</span>
+             ${isStory ? "어디서 웃고 어디서 딴생각이 들었는지" : isSocial ? "상대가 어떻게 느꼈을지" : "듣는 사람에게 무슨 일이 일어났는지"}는 기계로 셀 수 없어 AI가 필요해요.
              설정에서 <b>무료 Gemini 키</b>를 넣으면 받을 수 있습니다.
              <br><span class="muted small">키가 없어도 아래 발화 지표는 그대로 계산됩니다.</span></div>`
         : (state.settings.aiSaver
           ? `<div class="ai-ask-box">
-               <div class="ai-ask-text">${isSocial ? "🧑 <b>상대의 반응</b>을 시뮬레이션할까요?" : "🗣️ <b>청자 리포트</b>를 받아볼까요?"}
-                 <span class="muted" style="font-size:12px">${isSocial ? "체면·경청·주고받기·온기 4축" : "논리·전달·청자조율·안정감 4축"} · 호출 1회 · 오늘 ${todayAIUsage()}회</span></div>
-               <button class="btn btn-secondary small" id="sp-ask" style="margin:0">${isSocial ? "반응 보기" : "리포트 받기"}</button>
+               <div class="ai-ask-text">${isStory ? "🎧 <b>청중 반응</b>을 재생할까요?" : isSocial ? "🧑 <b>상대의 반응</b>을 시뮬레이션할까요?" : "🗣️ <b>청자 리포트</b>를 받아볼까요?"}
+                 <span class="muted" style="font-size:12px">${isStory ? "어디서 웃고 어디서 딴생각했는지 · 썰 6축" : isSocial ? "체면·경청·주고받기·온기 4축" : "논리·전달·청자조율·안정감 4축"} · 호출 1회 · 오늘 ${todayAIUsage()}회</span></div>
+               <button class="btn btn-secondary small" id="sp-ask" style="margin:0">${isStory ? "청중 반응 보기" : isSocial ? "반응 보기" : "리포트 받기"}</button>
              </div><div id="sp-fb"></div>`
           : `<div id="sp-fb"><span class="spinner"></span>분석 중…</div>`));
     return `
@@ -1856,8 +2042,8 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       ${slot}
 
       <details class="hint-fold" open>
-        <summary>📊 발화 지표 (기기에서 계산 · AI 없이)</summary>
-        ${speechScanHTML(sc)}
+        <summary>📊 ${isStory ? "썰 장치 점검" : "발화 지표"} (기기에서 계산 · AI 없이)</summary>
+        ${isStory ? storyScanHTML(stScan, sc) : speechScanHTML(sc)}
         ${(L.hints || []).slice(0, 2).map(h => `<div class="notice-q">→ ${esc(h)}</div>`).join("")}
       </details>
 
@@ -1874,29 +2060,32 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     $("#to-retry").addEventListener("click", () => { sess.stage = "retry"; save(); renderToday(); });
     $("#skip-retry").addEventListener("click", () => { sess.stage = "wrap"; save(); renderToday(); });
     const isSocial = L.track === "social";
+    const isStory = L.track === "story";
+    const sys = isStory ? STORY_SYSTEM : isSocial ? SOCIAL_SYSTEM : SPEECH_SYSTEM;
+    const dims = isStory ? STORY_DIMS : isSocial ? SOCIAL_DIMS : SPEECH_DIMS;
+    const renderRep = (r) => isStory ? renderStoryReport(r) : renderSpeechReport(r, dims);
     const ask = () => {
       const prevNote = sess.speechReport && sess.speechReport.nextAction;
       const cur = currentSpeechText(sess);
-      const msg = isSocial
-        ? socialUserMessage(L, cur, sess.topic)
-        : speechUserMessage(L, cur, (sess.revisePass || 0) + 1, prevNote);
-      requestSpeechReport("sp-fb", isSocial ? SOCIAL_SYSTEM : SPEECH_SYSTEM, msg,
-        isSocial ? SOCIAL_DIMS : SPEECH_DIMS,
-        (rep) => {
+      const take = (sess.revisePass || 0) + 1;
+      const msg = isStory ? storyUserMessage(L, cur, take, prevNote, sess.topic)
+        : isSocial ? socialUserMessage(L, cur, sess.topic)
+        : speechUserMessage(L, cur, take, prevNote);
+      requestSpeechReport("sp-fb", sys, msg, dims, (rep) => {
           sess.speechReport = rep; save();
           recordSpeech(rep, { day: sess.day, lessonId: L.id, track: L.track, take: sess.revisePass || 0 });
-        });
+        }, renderRep);
     };
     if (sess.speechReport) {
       const el = $("#sp-fb");
-      if (el) el.innerHTML = renderSpeechReport(sess.speechReport, isSocial ? SOCIAL_DIMS : SPEECH_DIMS);
+      if (el) el.innerHTML = renderRep(sess.speechReport);
     } else {
       const b = $("#sp-ask");
       if (b) b.addEventListener("click", ask);
       else if (aiReady() && !state.settings.aiSaver) ask();
     }
   }
-  async function requestSpeechReport(slotId, system, userMsg, dims, onDone) {
+  async function requestSpeechReport(slotId, system, userMsg, dims, onDone, renderFn) {
     const slot = $("#" + slotId);
     if (slot) slot.innerHTML = `<span class="spinner"></span>분석 중…`;
     try {
@@ -1905,14 +2094,14 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       if (!j.scores) throw new Error("점수가 없습니다");
       if (onDone) onDone(j);
       const s2 = $("#" + slotId);
-      if (s2) s2.innerHTML = renderSpeechReport(j, dims);
+      if (s2) s2.innerHTML = (renderFn || ((r) => renderSpeechReport(r, dims)))(j);
       return j;
     } catch (e) {
       const s2 = $("#" + slotId);
       if (s2) s2.innerHTML = `<span style="color:var(--danger)">분석 실패: ${esc(e.message)}</span>
         <button class="btn ghost small" id="${slotId}-retry">다시 시도</button>`;
       const rb = $("#" + slotId + "-retry");
-      if (rb) rb.addEventListener("click", () => requestSpeechReport(slotId, system, userMsg, dims, onDone));
+      if (rb) rb.addEventListener("click", () => requestSpeechReport(slotId, system, userMsg, dims, onDone, renderFn));
       return null;
     }
   }
@@ -1946,7 +2135,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       <div id="q-fb"></div>`;
   }
   function wireFeedback(sess, L) {
-    if (L.track === "speak" || L.track === "social") return wireSpeechFeedback(sess, L);
+    if (L.track === "speak" || L.track === "social" || L.track === "story") return wireSpeechFeedback(sess, L);
     $("#to-retry").addEventListener("click", () => { sess.stage = "retry"; save(); renderToday(); });
     $("#skip-retry").addEventListener("click", () => { sess.stage = "wrap"; save(); renderToday(); });
     const askQuality = () => requestQualityReport("q-fb", sess.submission,
@@ -2196,7 +2385,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   }
   /* 마무리 화면의 공통 부분 (비교 블록만 트랙별로 다르다) */
   function viewWrapBody(sess, L, compareBlock) {
-    const isSpeech = L.track === "speak" || L.track === "social";
+    const isSpeech = L.track === "speak" || L.track === "social" || L.track === "story";
     return `
     <div class="session-step">
       <span class="step-kicker ${L.track}">DAY ${sess.day} · 마무리</span>
@@ -2903,10 +3092,12 @@ ${text}
   function segmentHTML() {
     const d = state.drills || { total: 0 };
     const rp = (state.roleplayLog || []).length;
+    const sd = (state.studyDone || []).length;
     return `
       <div class="seg-row">
         <button class="seg ${practiceMode === "situations" ? "active" : ""}" data-mode="situations">🎤 상황</button>
         <button class="seg ${practiceMode === "roleplay" ? "active" : ""}" data-mode="roleplay">💬 롤플레이${rp ? `<span class="seg-n">${rp}</span>` : ""}</button>
+        <button class="seg ${practiceMode === "study" ? "active" : ""}" data-mode="study">🔬 썰해부${sd ? `<span class="seg-n">${sd}</span>` : ""}</button>
         <button class="seg ${practiceMode === "drills" ? "active" : ""}" data-mode="drills">👁️ 안목${d.total ? `<span class="seg-n">${d.total}</span>` : ""}</button>
       </div>`;
   }
@@ -2920,7 +3111,10 @@ ${text}
       ap.stage === "feedback" ? wirePracticeFeedback(ap, sit) : wirePracticeWrite(ap, sit);
       return;
     }
-    if (practiceMode === "roleplay") {
+    if (practiceMode === "study") {
+      root.innerHTML = segmentHTML() + viewStudy();
+      wireSegments(); wireStudy();
+    } else if (practiceMode === "roleplay") {
       root.innerHTML = segmentHTML() + viewRoleplay();
       wireSegments(); wireRoleplay();
     } else if (practiceMode === "drills") {
@@ -2936,6 +3130,78 @@ ${text}
     $$(".seg").forEach(s => s.addEventListener("click", () => {
       practiceMode = s.getAttribute("data-mode"); renderPractice(); window.scrollTo(0, 0);
     }));
+  }
+
+  /* ==================== 썰 해부 (API 0원) ====================
+   * 같은 사건의 밋밋한 버전과 재밌는 버전을 나란히 놓고, 무엇이 달라졌는지
+   * 먼저 스스로 찾게 한다(주목 가설). 안목이 먼저 서야 내 썰도 고칠 수 있다. */
+  let studyIdx = 0, studyRevealed = false, studyPicks = [];
+  function viewStudy() {
+    const p = STORY_PAIRS[studyIdx % STORY_PAIRS.length];
+    const done = (state.studyDone || []).length;
+    const tagChips = p.tags.map(t => {
+      const d = STORY_DIMS.find(x => x.key === t);
+      return d ? `<span class="tag-chip">${d.emoji} ${esc(d.label)}</span>` : "";
+    }).join("");
+    return `
+      <div class="card" style="padding:14px 16px">
+        <h2 style="margin-bottom:6px">🔬 썰 해부 <span class="sub">같은 사건, 다른 이야기</span></h2>
+        <p class="practice-intro">똑같은 일을 두 사람이 말했습니다. 무엇이 달라서 한쪽이 재밌는지
+        <b>먼저 스스로 찾아보세요.</b> 안목이 먼저 서야 내 썰도 고칠 수 있습니다.
+        <span class="muted" style="font-size:12px">· AI 호출 없음 · ${done}/${STORY_PAIRS.length}편 학습</span></p>
+      </div>
+
+      <div class="card">
+        <div class="study-title">📌 ${esc(p.title)}</div>
+        <div class="study-ver flat">
+          <div class="sv-head">😐 밋밋한 버전</div>
+          <div class="sv-body">${esc(p.flat)}</div>
+        </div>
+        <div class="study-ver good">
+          <div class="sv-head">😂 재밌는 버전</div>
+          <div class="sv-body">${esc(p.good)}</div>
+        </div>
+
+        ${!studyRevealed ? `
+          <div class="section-label">무엇이 달라졌나요? (여러 개 선택)</div>
+          <div class="study-picks">${STORY_DIMS.map(d =>
+            `<button class="pick-chip ${studyPicks.indexOf(d.key) >= 0 ? "on" : ""}" data-k="${d.key}">${d.emoji} ${esc(d.label)}</button>`).join("")}</div>
+          <button class="btn primary" id="study-reveal">확인하기</button>
+        ` : `
+          <div class="section-label">정답 — 이 예시가 쓴 장치</div>
+          <div class="study-answer">${tagChips}</div>
+          ${studyPicks.length ? `<p class="muted small">내가 고른 것: ${studyPicks.map(k => {
+            const d = STORY_DIMS.find(x => x.key === k);
+            const hit = p.tags.indexOf(k) >= 0;
+            return `<b class="${hit ? "sv-ok" : "sv-warn"}">${d ? d.label : k}${hit ? " ✓" : " ✗"}</b>`;
+          }).join(", ")}</p>` : ""}
+          <div class="fb-block fb-now"><span class="fb-h">왜 달라졌나</span>${esc(p.why)}</div>
+          <div class="fb-block fb-next"><span class="fb-h">기억할 원칙</span>${esc(p.lesson)}</div>
+          <button class="btn primary" id="study-next">다음 편</button>
+        `}
+      </div>`;
+  }
+  function wireStudy() {
+    $$(".pick-chip").forEach(b => b.addEventListener("click", () => {
+      const k = b.getAttribute("data-k");
+      const i = studyPicks.indexOf(k);
+      if (i >= 0) studyPicks.splice(i, 1); else studyPicks.push(k);
+      b.classList.toggle("on", studyPicks.indexOf(k) >= 0);
+    }));
+    const rv = $("#study-reveal");
+    if (rv) rv.addEventListener("click", () => {
+      studyRevealed = true;
+      const p = STORY_PAIRS[studyIdx % STORY_PAIRS.length];
+      state.studyDone = state.studyDone || [];
+      if (state.studyDone.indexOf(p.id) < 0) state.studyDone.push(p.id);
+      if (state.studyLastDate !== todayStr()) { state.studyLastDate = todayStr(); recordActivity(); }
+      save(); renderPractice();
+    });
+    const nx = $("#study-next");
+    if (nx) nx.addEventListener("click", () => {
+      studyIdx++; studyRevealed = false; studyPicks = [];
+      renderPractice(); window.scrollTo(0, 0);
+    });
   }
 
   /* ==================== 롤플레이 UI ==================== */
