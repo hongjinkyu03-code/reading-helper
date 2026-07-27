@@ -24,8 +24,8 @@
       pattern: ["write", "quality", "speak", "write", "quality", "speak", "review"]
     },
     speaking: {
-      label: "말하기 중심", desc: "말하기 3 · 사회성 1 · 썰 1 · 생각정리 1 · 복습 1",
-      pattern: ["speak", "social", "speak", "story", "quality", "speak", "review"]
+      label: "말하기 중심", desc: "말하기 3 · 사회성 2 · 썰 1 · 복습 1",
+      pattern: ["speak", "social", "speak", "story", "social", "speak", "review"]
     },
     story: {
       label: "썰·입담", desc: "재밌게 말하기 3 · 말하기 2 · 사회성 1 · 복습 1",
@@ -33,11 +33,11 @@
     },
     social: {
       label: "사회성 집중", desc: "사회적 말하기와 대화 기술 위주",
-      pattern: ["social", "speak", "social", "speak", "social", "quality", "review"]
+      pattern: ["social", "speak", "social", "speak", "social", "story", "review"]
     },
     writing: {
       label: "글쓰기 중심", desc: "문장·구조·품질 위주",
-      pattern: ["write", "quality", "write", "quality", "write", "speak", "review"]
+      pattern: ["write", "quality", "write", "quality", "write", "quality", "review"]
     }
   };
   function currentPattern() {
@@ -47,6 +47,14 @@
   const TRACK_PATTERN = TRACK_PRESETS.balanced.pattern;   // 하위 호환
   const TRACK_NAMES = { write: "구조", quality: "품질", speak: "말하기", social: "사회성", story: "썰", review: "복습·통합", diagnostic: "진단" };
   const TRACK_ICONS = { write: "✍️ 구조", quality: "✨ 품질", speak: "🎙️ 말하기", social: "🤝 사회성", story: "🎭 썰", review: "🔁 복습·통합" };
+  /* 화면 필터링용 모드 — "글쓰기"만 순수 글쓰기, 나머지(말하기·썰·사회성)는 전부 말하기 계열.
+     '균형'만 예외적으로 둘 다 섞는 프리셋이라 화면을 필터링하지 않고 전부 보여준다. */
+  function currentMode() {
+    if (state.preset === "balanced") return "both";
+    if (state.preset === "writing") return "write";
+    return "speak";
+  }
+  const MODE_TRACKS = { write: ["write", "quality"], speak: ["speak", "social", "story"], both: ["write", "quality", "speak", "social", "story"] };
 
   /* ----------------------------- 상태 ----------------------------- */
   function defaultState() {
@@ -2566,7 +2574,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
       const cls = !sk ? "d-none" : sk.rating === 1 ? "d-weak" : sk.rating === 2 ? "d-mid" : sk.rating >= 3 ? "d-strong" : "d-none";
       return `<div class="skill-chip"><span class="sname">${esc(l.skill.split(" — ")[0])}</span><span class="dot ${cls}"></span></div>`;
     };
-    grid.innerHTML = ["write", "quality", "speak"].map(t => {
+    grid.innerHTML = MODE_TRACKS[currentMode()].map(t => {
       const pool = POOLS[t] || [];
       if (!pool.length) return "";
       return `<div class="skill-group"><div class="skill-group-h">${TRACK_ICONS[t] || t}</div>
@@ -2607,7 +2615,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     state.preset = k;
     // 프리셋이 바뀌면 기존 계획의 트랙이 안 맞으므로 계획을 비운다
     state.plan = {}; state.planFrom = 0; state.planStale = !!state.goals;
-    save(); renderProgress(); renderToday(); renderModeBar();
+    save(); renderProgress(); renderToday(); renderModeBar(); renderPractice();
     if (statusSel) {
       setStatus(statusSel, `‘${TRACK_PRESETS[k].label}’으로 바꿨어요. 다음 세션부터 적용됩니다.` +
         (state.goals ? " 목표에 맞춰 다시 계획하면 더 정확해져요." : ""), "ok");
@@ -2640,6 +2648,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   function renderAnxietyPanel() {
     const card = $("#anxiety-card"), el = $("#anxiety-panel");
     if (!card || !el) return;
+    if (currentMode() === "write") { card.style.display = "none"; return; }
     const log = (state.anxiety && state.anxiety.log) || [];
     if (!log.length) { card.style.display = "none"; return; }
     card.style.display = "block";
@@ -2662,6 +2671,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   function renderQualityPanel() {
     const card = $("#quality-card"), el = $("#quality-panel");
     if (!card || !el) return;
+    if (currentMode() === "speak") { card.style.display = "none"; return; }
     const hist = state.quality || [];
     if (!hist.length) { card.style.display = "none"; return; }
     card.style.display = "block";
@@ -2700,6 +2710,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   function renderDrillStat() {
     const card = $("#drill-stat-card"), el = $("#drill-stat");
     if (!card || !el) return;
+    if (currentMode() === "speak") { card.style.display = "none"; return; }
     const d = state.drills || { total: 0 };
     if (!d.total) { card.style.display = "none"; return; }
     card.style.display = "block";
@@ -3170,18 +3181,30 @@ ${text}
   let practiceCat = "all";
   const sitById = (id) => SITUATIONS.find(s => s.id === id);
 
-  let practiceMode = "situations";   // 'situations' | 'drills' | 'roleplay'
+  let practiceMode = "situations";   // 'situations' | 'roleplay' | 'study' | 'drills'
+  /* 안목(drills)은 글쓰기 계열, 나머지 셋은 말하기 계열 — 상단 글쓰기·말하기 스위치에 맞춰 걸러낸다.
+     '균형' 프리셋일 때만 전부 보여준다. */
+  const SEGMENT_DEFS = [
+    { key: "situations", label: "🎤 상황", mode: "speak" },
+    { key: "roleplay", label: "💬 롤플레이", mode: "speak" },
+    { key: "study", label: "🔬 썰해부", mode: "speak" },
+    { key: "drills", label: "👁️ 안목", mode: "write" }
+  ];
+  function availableSegments() {
+    const m = currentMode();
+    return SEGMENT_DEFS.filter(s => m === "both" || s.mode === m);
+  }
   function segmentHTML() {
     const d = state.drills || { total: 0 };
     const rp = (state.roleplayLog || []).length;
     const sd = (state.studyDone || []).length;
-    return `
-      <div class="seg-row">
-        <button class="seg ${practiceMode === "situations" ? "active" : ""}" data-mode="situations">🎤 상황</button>
-        <button class="seg ${practiceMode === "roleplay" ? "active" : ""}" data-mode="roleplay">💬 롤플레이${rp ? `<span class="seg-n">${rp}</span>` : ""}</button>
-        <button class="seg ${practiceMode === "study" ? "active" : ""}" data-mode="study">🔬 썰해부${sd ? `<span class="seg-n">${sd}</span>` : ""}</button>
-        <button class="seg ${practiceMode === "drills" ? "active" : ""}" data-mode="drills">👁️ 안목${d.total ? `<span class="seg-n">${d.total}</span>` : ""}</button>
-      </div>`;
+    const badge = { situations: "", roleplay: rp ? `<span class="seg-n">${rp}</span>` : "",
+      study: sd ? `<span class="seg-n">${sd}</span>` : "", drills: d.total ? `<span class="seg-n">${d.total}</span>` : "" };
+    const segs = availableSegments();
+    if (segs.length <= 1) return "";   // 하나뿐이면 고를 게 없으니 전환 UI를 안 보여준다
+    return `<div class="seg-row">${segs.map(s =>
+      `<button class="seg ${practiceMode === s.key ? "active" : ""}" data-mode="${s.key}">${s.label}${badge[s.key] || ""}</button>`
+    ).join("")}</div>`;
   }
   function renderPractice() {
     const root = $("#practice-root");
@@ -3193,6 +3216,9 @@ ${text}
       ap.stage === "feedback" ? wirePracticeFeedback(ap, sit) : wirePracticeWrite(ap, sit);
       return;
     }
+    // 현재 모드에서 안 보이는 세그먼트에 남아 있었으면 이 모드의 첫 번째 세그먼트로 옮긴다
+    const segs = availableSegments().map(s => s.key);
+    if (!segs.includes(practiceMode)) practiceMode = segs[0] || "situations";
     if (practiceMode === "study") {
       root.innerHTML = segmentHTML() + viewStudy();
       wireSegments(); wireStudy();
