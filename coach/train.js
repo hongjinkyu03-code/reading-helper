@@ -57,6 +57,43 @@ const RE_QUESTION = /[?？]/;
 const RE_PRESENT = /(는|은)\s*거[야예]|잖아|더라고|는데\s*말이야/;
 const RE_DIALOGUE = /['"“”'']|라고\s*(했|하더|그랬)|(요|다|야|어|지)\s+(하고|하더|했는데|했어|그러|이러)/;
 
+/* ======================================================================
+ * 채점 규칙 카탈로그 — AI 자동 생성 전용
+ *
+ * 왜 카탈로그인가:
+ *   rewrite 문항을 AI에게 만들게 하려면 채점 규칙이 필요한데, 정규식을
+ *   AI가 직접 쓰게 하면 검증할 방법이 없다(문법은 맞는데 의도와 다른 것을
+ *   잡는 정규식을 만들어내도 알아챌 수 없다). 그래서 규칙은 전부 사람이
+ *   미리 쓰고 테스트해두고, AI는 이 목록에서 '고르기만' 한다.
+ *
+ *   생성된 문항은 localStorage에 JSON으로 저장되는데 정규식은 JSON을
+ *   통과하지 못한다(RegExp → {}). 그래서 생성 문항은 규칙의 '키'만 들고
+ *   있고, 채점하는 순간에 이 표에서 실제 정규식을 찾아 쓴다.
+ * ====================================================================== */
+const TRAIN_CHECKS = {
+  conclusion_first:  { label: "결론으로 시작",      need: true,  re: RE_CONCLUSION_FIRST },
+  has_question:      { label: "질문 포함",          need: true,  re: RE_QUESTION },
+  has_dialogue:      { label: "재연 대사",          need: true,  re: RE_DIALOGUE },
+  has_present:       { label: "현재형 재연",        need: true,  re: RE_PRESENT },
+  has_number:        { label: "구체적 수치",        need: true,  re: /\d/ },
+  has_causal:        { label: "인과 연결어",        need: true,  re: /때문|덕분|그래서|따라서|결과|이유는|므로|바람에|탓에/ },
+  has_signpost:      { label: "신호어·순서 표지",    need: true,  re: /첫째|둘째|셋째|세 가지|두 가지|먼저|다음으로|마지막으로|정리하면/ },
+  has_alternative:   { label: "대안·조건 제시",      need: true,  re: /대신|다만|어떨까요|어떠세요|가능합니다|까지는|한편/ },
+  has_acknowledge:   { label: "상대 인정 먼저",      need: true,  re: /이해합니다|이해해요|공감|취지|맞는 말|동의|자체는 좋|좋은 방향|정확합니다|정확한/ },
+  has_sensory:       { label: "감각·장면 묘사",      need: true,  re: /소리|냄새|빛|색|손|눈|귀|표정|목소리|얼굴|어깨/ },
+  ends_properly:     { label: "문장을 끝맺음",       need: true,  re: /니다|해요|어요|아요|네요/ },
+
+  no_filler:         { label: "채움말 제거",        need: false, re: /(^|[\s,.])(음+|어+|그+|저기|뭐랄까|그니까)([\s,.]|$)/ },
+  no_hedge:          { label: "완충 표현 제거",      need: false, re: /약간|뭔가|같기도|것 같기|좀 그런/ },
+  no_emotion_tell:   { label: "감정 설명어 없음",    need: false, re: /민망|창피|당황|어색했|지루했|재미없었|황당했|웃겼|힘들었/ },
+  no_vague:          { label: "막연한 수식어 제거",  need: false, re: /다양한|여러 가지|많은 부분|등을 통해|여러모로/ },
+  no_intensifier:    { label: "강조 부사 제거",      need: false, re: /매우|정말로|굉장히|아주|엄청|되게|사실상/ },
+  no_preview:        { label: "예고문 제거",        need: false, re: /이 글에서는|정리해보려|이야기해보려|대해 알아보|말씀드리려/ },
+  no_translationese: { label: "번역투 제거",        need: false, re: /하여금|이루어졌|되어지|에 의해/ },
+  no_selfeval:       { label: "자기 평가로 닫지 않음", need: false, re: /별거 아니|다행이었|웃기더라|그냥 그랬/ },
+  no_flat_close:     { label: "맺음이 흐지부지하지 않음", need: false, re: /뭐 그런|그런 것들|등등|암튼|아무튼/ }
+};
+
 const TRAIN_ITEMS = [
   /* ==================== 말하기 · 결론부터 (PREP) ==================== */
   {
@@ -1577,5 +1614,5 @@ const TRAIN_ITEMS = [
 ];
 
 if (typeof module !== "undefined") {
-  module.exports = { TRAIN_SKILLS, TRAIN_ITEMS };
+  module.exports = { TRAIN_SKILLS, TRAIN_CHECKS, TRAIN_ITEMS };
 }

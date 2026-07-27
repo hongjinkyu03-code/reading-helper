@@ -88,7 +88,7 @@
       preset: "balanced",     // 트랙 프리셋 (balanced|speaking|social|writing)
       drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
       aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
-      train: { daily: null, log: {}, xp: 0, correct: 0, total: 0, generated: [], gen: null },  // 매일 훈련 진행
+      train: { daily: null, log: {}, xp: 0, correct: 0, total: 0, generated: [], gen: null, genTurn: 0 },  // 매일 훈련 진행
       settings: {
         aiEnabled: false,
         aiSaver: true,        // 절약 모드: AI 피드백을 탭할 때만 호출
@@ -148,6 +148,7 @@
     if (typeof s.train.correct !== "number") s.train.correct = 0;
     if (typeof s.train.total !== "number") s.train.total = 0;
     if (!Array.isArray(s.train.generated)) s.train.generated = [];
+    if (typeof s.train.genTurn !== "number") s.train.genTurn = 0;
     if (!set.provider) set.provider = "gemini";
     if (!set.gemini) set.gemini = { key: "", model: "gemini-2.5-flash" };
     if (!set.anthropic) set.anthropic = { key: set.apiKey || "", model: set.model || "claude-sonnet-5" };
@@ -3465,7 +3466,10 @@ ${text}
   function trainSet() {
     const t = todayStr();
     const d = state.train.daily;
-    const byId = {}; TRAIN_ITEMS.forEach(it => { byId[it.id] = it; });
+    // AI 생성 문항까지 포함해야 한다. 원본만 넣으면 세트에 담긴 생성 문항이
+    // 조회에 실패해 조용히 사라지고, 세트가 통째로 다시 만들어진다.
+    const byId = {};
+    TRAIN_ITEMS.concat((state.train && state.train.generated) || []).forEach(it => { byId[it.id] = it; });
     if (d && d.date === t && d.ids && d.ids.length) {
       const items = d.ids.map(id => byId[id]).filter(Boolean);
       if (items.length) return { items: items, solved: d.solved || [] };
@@ -3477,9 +3481,22 @@ ${text}
   }
 
   /* 채점 — mcq/order는 정오답이 분명하고, rewrite/fill은 규칙 통과 여부로 본다 */
+  /* 채점 규칙을 실제 정규식으로 풀어낸다.
+     - 손으로 쓴 문항: checks에 정규식이 그대로 들어 있다
+     - AI 생성 문항: 정규식은 localStorage(JSON)를 통과 못 하므로 카탈로그 키만
+       들고 있다. 채점하는 이 시점에 TRAIN_CHECKS에서 찾아 쓴다. */
+  function resolveChecks(item) {
+    if (Array.isArray(item.checks)) return item.checks;
+    const out = (item.checkKeys || []).map(k => TRAIN_CHECKS[k]).filter(Boolean);
+    if (item.maxChars) {
+      out.push({ label: `${item.maxChars}자 이내`, need: true, maxChars: item.maxChars });
+    }
+    return out;
+  }
   function gradeRewrite(item, text) {
     const t = String(text || "");
-    return item.checks.map(c => {
+    return resolveChecks(item).map(c => {
+      if (c.maxChars) return { label: c.label, ok: charLen(t) <= c.maxChars, need: true };
       // 원본 정규식에 g 플래그가 있으면 test()가 상태를 갖게 되므로 매번 새로 만든다
       const re = new RegExp(c.re.source, c.re.flags.replace("g", ""));
       const hit = re.test(t);
@@ -3778,6 +3795,117 @@ ${usedPrompts.join(" / ")}
 ${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 기술의 새 객관식 문제 ${n}개를 위 조건에 맞춰 JSON으로 출제하세요. 소재를 서로 다르게 하세요.`;
   }
 
+  const REWRITE_GEN_SYSTEM = `당신은 한국어 말하기·글쓰기 '고쳐쓰기' 훈련 문제를 만드는 출제자입니다.
+학습자는 나쁜 문장을 직접 고쳐 쓰고, 앱이 규칙으로 자동 채점합니다.
+
+## 가장 중요한 조건 — 채점 규칙은 목록에서 '고르기만' 하세요
+정규식을 직접 만들지 마세요. 아래 목록의 key만 1~3개 고릅니다.
+그리고 **당신이 쓴 모범답안(model)이 고른 규칙을 전부 통과해야** 하고,
+**나쁜 예시(before)는 최소 하나의 규칙에 걸려야** 합니다. 이 두 조건을 스스로 확인하세요.
+둘 중 하나라도 어긋나면 그 문제는 버리고 다른 문제를 만드세요.
+
+## 고를 수 있는 채점 규칙
+[반드시 있어야 하는 것]
+- conclusion_first: 결론으로 시작 (저는/결론부터/핵심은 등으로 시작)
+- has_question: 물음표가 있는 질문 포함
+- has_dialogue: 따옴표나 인용 표현으로 실제 대사를 재연
+- has_present: 현재형 재연 (~하는 거야/~잖아/~더라고)
+- has_number: 숫자 포함
+- has_causal: 인과 연결어 (때문/그래서/덕분/바람에)
+- has_signpost: 신호어 (첫째/세 가지/먼저/정리하면)
+- has_alternative: 대안·조건 제시 (대신/다만/~는 어떨까요)
+- has_acknowledge: 상대 인정 먼저 (이해합니다/취지는/자체는 좋)
+- has_sensory: 감각·장면 묘사 (소리/표정/손/목소리)
+- ends_properly: 문장을 제대로 끝맺음 (~니다/~해요/~어요)
+[있으면 안 되는 것]
+- no_filler: 채움말 (음/어/그/저기/그니까)
+- no_hedge: 완충 표현 (약간/뭔가/~같기도)
+- no_emotion_tell: 감정 설명어 (민망/당황/지루했/웃겼)
+- no_vague: 막연한 수식어 (다양한/여러 가지)
+- no_intensifier: 강조 부사 (매우/정말로/굉장히/되게)
+- no_preview: 예고문 (이 글에서는/~해보려고 한다)
+- no_translationese: 번역투 (하여금/이루어졌/에 의해)
+- no_selfeval: 자기 평가로 닫기 (별거 아니/다행이었)
+- no_flat_close: 흐지부지한 맺음 (뭐 그런/등등/아무튼)
+
+## 그 밖의 조건
+1. before는 **실제로 사람들이 흔히 쓰는 문장**이어야 합니다. 일부러 우스꽝스럽게 만들지 마세요.
+2. model은 자연스러운 한국어여야 하고, 과장되지 않아야 합니다.
+3. ask는 무엇을 고쳐야 하는지 한 문장으로 분명하게.
+4. maxChars는 글자 수 제한이 꼭 필요할 때만 넣으세요(생략 가능). 넣는다면 model이 그 안에 들어가야 합니다.
+5. 소재는 한국인의 일상·직장·학교 맥락에서, 매 문제마다 다르게.
+
+## 아래 JSON만 출력 (코드블록·설명·인사말 금지)
+{"items":[
+  {"before":"고쳐야 할 문장","ask":"어떻게 고치라는 지시 한 문장",
+   "checkKeys":["규칙key1","규칙key2"],"maxChars":0,
+   "model":"모범답안","why":"왜 이렇게 고치는 게 나은지 이론적 이유 2~3문장","tip":"기억할 원칙 한 문장"}
+]}
+maxChars가 필요 없으면 0으로 두세요.
+
+## JSON 형식 주의 (반드시)
+- 값 안에 큰따옴표(")를 쓰지 마세요. 인용이 필요하면 홑따옴표(')를 쓰세요.
+- 값 안에서 줄바꿈하지 마세요.
+- 마지막 항목 뒤에 콤마를 붙이지 마세요.`;
+
+  const FILL_GEN_SYSTEM = `당신은 한국어 말하기·글쓰기 '틀 채우기' 훈련 문제를 만드는 출제자입니다.
+학습자는 주어진 상황에 대해 정해진 틀의 각 칸을 직접 채웁니다.
+정답을 맞히는 문제가 아니라, 틀을 몸에 붙이는 훈련입니다.
+
+## 조건
+1. topic은 학습자가 답할 구체적인 상황이나 질문 한 문장입니다.
+2. slots는 2~4개. 각 칸은 틀의 한 단계여야 합니다(예: 주장 → 이유 → 예시 → 재주장).
+3. 각 칸에는 key(영문 소문자), label(칸 이름), hint(무엇을 쓸지 안내), min(최소 글자 수 5~40)을 넣으세요.
+4. model에는 각 key마다 모범답안을 넣되, **반드시 그 칸의 min 글자 수보다 길게** 쓰세요.
+5. 틀은 실제로 쓸모 있어야 합니다. 억지로 단계를 나누지 마세요.
+6. 소재는 매 문제마다 다르게.
+
+## 아래 JSON만 출력 (코드블록·설명·인사말 금지)
+{"items":[
+  {"topic":"상황·질문 한 문장",
+   "slots":[{"key":"p","label":"주장","hint":"무엇을 쓸지 안내","min":10}],
+   "model":{"p":"모범답안 (min보다 길게)"},
+   "why":"이 틀이 왜 효과적인지 이론적 이유 2~3문장","tip":"기억할 원칙 한 문장"}
+]}
+
+## JSON 형식 주의 (반드시)
+- 값 안에 큰따옴표(")를 쓰지 마세요.
+- 값 안에서 줄바꿈하지 마세요.
+- 마지막 항목 뒤에 콤마를 붙이지 마세요.`;
+
+  function rewriteGenUserMessage(skillKey, n) {
+    const sk = TRAIN_SKILLS[skillKey] || { label: skillKey };
+    const examples = TRAIN_ITEMS.filter(it => it.skill === skillKey && it.type === "rewrite").slice(0, 2)
+      .map(it => `- 고칠 문장: ${it.before}\n  지시: ${it.ask}\n  모범답안: ${it.model}`).join("\n");
+    const used = trainPool().filter(it => it.type === "rewrite").map(it => it.before).slice(0, 12);
+    return `[겨냥할 기술] ${sk.label} (${skillKey})
+
+[이 기술의 기존 문제 예시 — 형식 기준. 내용은 절대 반복하지 말 것]
+${examples || "(아직 예시 없음)"}
+
+[이미 나온 고칠 문장들 — 겹치지 않게]
+${used.join(" / ")}
+
+${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 기술의 새 고쳐쓰기 문제 ${n}개를 위 조건에 맞춰 JSON으로 출제하세요.
+다시 강조합니다: model은 고른 규칙을 전부 통과해야 하고, before는 최소 하나에 걸려야 합니다.`;
+  }
+
+  function fillGenUserMessage(skillKey, n) {
+    const sk = TRAIN_SKILLS[skillKey] || { label: skillKey };
+    const examples = TRAIN_ITEMS.filter(it => it.skill === skillKey && it.type === "fill").slice(0, 1)
+      .map(it => `- 상황: ${it.topic}\n  칸: ${it.slots.map(s => s.label).join(" → ")}`).join("\n");
+    const used = trainPool().filter(it => it.type === "fill").map(it => it.topic).slice(0, 10);
+    return `[겨냥할 기술] ${sk.label} (${skillKey})
+
+[기존 문제 예시 — 형식 기준. 내용은 절대 반복하지 말 것]
+${examples || "(아직 예시 없음)"}
+
+[이미 나온 상황들 — 겹치지 않게]
+${used.join(" / ")}
+
+${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 기술의 새 틀 채우기 문제 ${n}개를 위 조건에 맞춰 JSON으로 출제하세요.`;
+  }
+
   function validateGenTrainItem(raw) {
     if (!raw || typeof raw !== "object") return null;
     const prompt = String(raw.prompt || "").trim();
@@ -3799,6 +3927,99 @@ ${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 기술의 새 객
     };
   }
 
+  /* ---- rewrite 문항 생성 ----
+   * 정규식은 AI에게 맡기지 않는다. 카탈로그(TRAIN_CHECKS)에서 키만 고르게 하고,
+   * 두 개의 관문으로 문항이 실제로 무언가를 가르치는지 검증한다:
+   *   ① 모범답안(model)은 고른 규칙을 전부 통과해야 한다
+   *      → 통과 못하면, 학습자가 모범답안대로 써도 오답 처리되는 함정 문항이다
+   *   ② 나쁜 예시(before)는 최소 하나의 규칙에 걸려야 한다
+   *      → 안 걸리면 고칠 게 없는 문항이라 연습이 되지 않는다
+   * 이 두 관문을 통과하면, 그 문항은 '측정 가능한 개선'을 가르친다는 뜻이다. */
+  const REWRITE_CHECK_KEYS = Object.keys(TRAIN_CHECKS);
+
+  function validateGenRewriteItem(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const before = String(raw.before || "").trim();
+    const ask = String(raw.ask || "").trim();
+    const model = String(raw.model || "").trim();
+    const why = String(raw.why || "").trim();
+    if (!before || !ask || !model || !why) return null;
+    if (why.length < 15 || before.length < 10 || model.length < 5) return null;
+    if (before === model) return null;
+
+    const keys = Array.isArray(raw.checkKeys)
+      ? raw.checkKeys.map(k => String(k || "").trim()).filter(k => REWRITE_CHECK_KEYS.indexOf(k) >= 0)
+      : [];
+    const uniqKeys = [...new Set(keys)];
+    if (!uniqKeys.length || uniqKeys.length > 3) return null;
+
+    let maxChars = Number(raw.maxChars);
+    if (!Number.isInteger(maxChars) || maxChars < 15 || maxChars > 400) maxChars = 0;
+
+    const probe = { checkKeys: uniqKeys, maxChars: maxChars };
+    // 관문 ① 모범답안은 전부 통과해야 한다
+    if (!gradeRewrite(probe, model).every(m => m.ok)) return null;
+    // 관문 ② 나쁜 예시는 최소 하나에 걸려야 한다
+    if (gradeRewrite(probe, before).every(m => m.ok)) return null;
+
+    if (trainPool().some(it => it.before === before || it.ask === ask)) return null;
+    return {
+      id: "tg-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6),
+      mode: TRAIN_SKILLS[raw._skill].mode, skill: raw._skill, type: "rewrite",
+      before: before, ask: ask, model: model, why: why,
+      checkKeys: uniqKeys, maxChars: maxChars || undefined,
+      tip: raw.tip ? String(raw.tip).trim() : undefined, ai: true
+    };
+  }
+
+  /* ---- fill 문항 생성 ----
+   * 채점이 '각 칸을 최소 길이 이상 채웠는가'뿐이라 정규식이 필요 없다.
+   * 정오답을 가리는 문항이 아니라 '틀을 직접 채워봤는가'를 보는 문항이므로,
+   * 검증은 구조(칸 수·모범답안 존재·길이)만 확인하면 충분하다. */
+  function validateGenFillItem(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const topic = String(raw.topic || "").trim();
+    const why = String(raw.why || "").trim();
+    if (!topic || !why || why.length < 15 || topic.length < 8) return null;
+
+    const slots = Array.isArray(raw.slots) ? raw.slots : [];
+    if (slots.length < 2 || slots.length > 4) return null;
+    const model = raw.model && typeof raw.model === "object" ? raw.model : null;
+    if (!model) return null;
+
+    const clean = [];
+    const seen = new Set();
+    for (const s of slots) {
+      const key = String((s && s.key) || "").trim();
+      const label = String((s && s.label) || "").trim();
+      if (!key || !label || seen.has(key)) return null;
+      seen.add(key);
+      let min = Number(s.min);
+      if (!Number.isInteger(min) || min < 5 || min > 40) min = 10;
+      const ans = String(model[key] || "").trim();
+      if (charLen(ans) < min) return null;   // 모범답안이 자기 최소 길이도 못 채우면 버린다
+      clean.push({ key: key, label: label, hint: s.hint ? String(s.hint).trim() : "", min: min });
+    }
+    if (trainPool().some(it => it.topic === topic)) return null;
+
+    const cleanModel = {};
+    clean.forEach(s => { cleanModel[s.key] = String(model[s.key]).trim(); });
+    return {
+      id: "tg-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6),
+      mode: TRAIN_SKILLS[raw._skill].mode, skill: raw._skill, type: "fill",
+      topic: topic, slots: clean, model: cleanModel, why: why,
+      tip: raw.tip ? String(raw.tip).trim() : undefined, ai: true
+    };
+  }
+
+  /* 생성 타입 순환표. 고르기(mcq)만 쌓이면 인식만 늘고 생산 연습이 안 되므로
+     직접 쓰는 두 타입(rewrite/fill)을 섞어 돌린다. */
+  const TRAIN_GEN_TYPES = [
+    { key: "mcq", n: 6, tokens: 2800, system: TRAIN_GEN_SYSTEM, user: trainGenUserMessage, validate: validateGenTrainItem },
+    { key: "rewrite", n: 4, tokens: 3200, system: REWRITE_GEN_SYSTEM, user: rewriteGenUserMessage, validate: validateGenRewriteItem },
+    { key: "fill", n: 3, tokens: 3200, system: FILL_GEN_SYSTEM, user: fillGenUserMessage, validate: validateGenFillItem }
+  ];
+
   let _trainGenRunning = false;
   async function generateTrainItems(manual) {
     if (_trainGenRunning || !aiReady()) return 0;
@@ -3812,13 +4033,17 @@ ${state.goals ? `[학습자 목표] ${state.goals}\n` : ""}이 기술의 새 객
     let added = 0;
     try {
       if (!skill) throw new Error("대상 기술을 찾을 수 없어요");
-      const raw = await callAI(TRAIN_GEN_SYSTEM, trainGenUserMessage(skill, 6), 2800, true);
+      /* 타입을 돌려가며 만든다. 고르기만 계속 쌓이면 '인식'만 늘고
+         직접 쓰는 연습이 안 는다. 생성 횟수를 세어 세 타입을 순환시킨다. */
+      const spec = TRAIN_GEN_TYPES[(state.train.genTurn || 0) % TRAIN_GEN_TYPES.length];
+      state.train.genTurn = (state.train.genTurn || 0) + 1;
+      const raw = await callAI(spec.system, spec.user(skill, spec.n), spec.tokens, true);
       const j = extractJSON(raw);
       const list = Array.isArray(j.items) ? j.items : [];
       state.train.generated = state.train.generated || [];
       list.forEach(item => {
         item._skill = skill;
-        const v = validateGenTrainItem(item);
+        const v = spec.validate(item);
         if (v) { state.train.generated.push(v); added++; }
       });
       const t = todayStr();
