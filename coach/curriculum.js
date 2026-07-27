@@ -287,7 +287,12 @@ const CURRICULUM = [
     noticing: ["옮긴 내용에서 R(이유)과 E(예시)가 정말 구분되나요, 아니면 같은 말인가요?", "첫 P와 마지막 P가 같은 결론을 가리키나요?"],
     hints: ["예시(E)가 비면, 겪은 일 하나를 떠올려 채우세요.", "이유(R)가 결론의 반복이면 '왜냐하면'으로 다시 시작하세요."],
     retry: "가장 약한 부분(대개 E)을 보강해 그 부분만 다시 말하고 옮기세요.",
-    speak: { mode: "prep", prepSec: 60, speakSec: 120 }
+    speak: { mode: "prep", prepSec: 60, speakSec: 120 },
+    takes: [
+      { focus: "logic", instruction: "준비 1분 후 그대로 말하세요. 완벽하지 않아도 끝까지 갑니다." },
+      { focus: "logic", instruction: "같은 주제를 다시. 이번엔 P·R·E·P 네 부분이 모두 드러나게 하세요." },
+      { focus: "delivery", instruction: "마지막 한 번. 90초로 줄여 군더더기를 걷어내고 말하세요." }
+    ]
   },
   {
     id: "speak-reframe",
@@ -303,7 +308,11 @@ const CURRICULUM = [
     noticing: ["구어체 버전을 소리 내어 읽어보세요. 숨이 차거나 혀가 꼬이는 곳이 있나요?", "문어체와 구어체를 나란히 두면, 어디가 가장 달라졌나요?"],
     hints: ["'~함에 틀림없다' 같은 표현을 '~거든요/~잖아요'처럼 말투로 바꾸세요.", "한 문장이 너무 길면, 듣는 사람이 숨 쉴 곳에서 끊으세요."],
     retry: "가장 안 읽히는 한 문장을, 더 입에 붙게 다시 말하고 옮기세요.",
-    speak: { mode: "reframe", prepSec: 0, speakSec: 0 }
+    speak: { mode: "reframe", prepSec: 0, speakSec: 0 },
+    takes: [
+      { focus: "delivery", instruction: "문어체 문장을 소리 내어 말로 바꿔보세요." },
+      { focus: "delivery", instruction: "다시. 이번엔 문장을 더 잘게 끊고 어려운 한자어를 쉬운 말로 바꾸세요." }
+    ]
   },
   {
     id: "speak-feynman",
@@ -319,7 +328,12 @@ const CURRICULUM = [
     noticing: ["설명 중 스스로 막히거나 얼버무린 곳이 있었나요? 그곳이 당신 이해의 빈틈입니다.", "전문 용어를 전문 용어로 설명한 곳은 없나요?"],
     hints: ["막힌 지점의 개념을 더 작게 쪼개 하나씩 설명하세요.", "비유가 없으면, 일상의 익숙한 것에 빗대는 문장을 하나 넣으세요."],
     retry: "가장 막혔던 부분만, 더 쉬운 말과 비유로 다시 설명하고 옮기세요.",
-    speak: { mode: "feynman", prepSec: 60, speakSec: 120 }
+    speak: { mode: "feynman", prepSec: 60, speakSec: 120 },
+    takes: [
+      { focus: "audience", instruction: "아는 사람에게 하듯 설명해보세요." },
+      { focus: "audience", instruction: "다시. 이번엔 열 살 아이에게, 비유만으로 설명하세요." },
+      { focus: "confidence", instruction: "마지막. 막혔던 지점을 메우고 처음부터 끝까지 매끄럽게 설명하세요." }
+    ]
   }
 ];
 

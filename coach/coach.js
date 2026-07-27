@@ -16,7 +16,31 @@
 
   /* 트랙 순환 패턴 (Day 2부터): 구조2 · 품질2 · 말하기2 · 복습1 = 7일 주기
      구조(문장·문단)와 품질(개연성·흥미·어휘)을 번갈아 배치해 서로를 보강한다. */
-  const TRACK_PATTERN = ["write", "quality", "speak", "write", "quality", "speak", "review"];
+  /* 트랙 프리셋 — 목표에 따라 리듬을 바꾼다.
+     말하기 중심에서는 글쓰기를 버리지 않고 '말할 내용을 만드는 도구'로 재배치한다. */
+  const TRACK_PRESETS = {
+    balanced: {
+      label: "균형", desc: "글쓰기와 말하기를 고르게",
+      pattern: ["write", "quality", "speak", "write", "quality", "speak", "review"]
+    },
+    speaking: {
+      label: "말하기 중심", desc: "말하기 3 · 사회성 2 · 생각정리(글) 1 · 복습 1",
+      pattern: ["speak", "social", "speak", "quality", "social", "speak", "review"]
+    },
+    social: {
+      label: "사회성 집중", desc: "사회적 말하기와 대화 기술 위주",
+      pattern: ["social", "speak", "social", "speak", "social", "quality", "review"]
+    },
+    writing: {
+      label: "글쓰기 중심", desc: "문장·구조·품질 위주",
+      pattern: ["write", "quality", "write", "quality", "write", "speak", "review"]
+    }
+  };
+  function currentPattern() {
+    const p = TRACK_PRESETS[state.preset] || TRACK_PRESETS.balanced;
+    return p.pattern;
+  }
+  const TRACK_PATTERN = TRACK_PRESETS.balanced.pattern;   // 하위 호환
   const TRACK_NAMES = { write: "구조", quality: "품질", speak: "말하기", social: "사회성", review: "복습·통합", diagnostic: "진단" };
   const TRACK_ICONS = { write: "✍️ 구조", quality: "✨ 품질", speak: "🎙️ 말하기", social: "🤝 사회성", review: "🔁 복습·통합" };
 
@@ -47,6 +71,8 @@
       speech: [],             // 말하기·사회성 축 추이 [{date, track, scores}]
       roleplay: null,         // 진행 중 롤플레이 대화
       roleplayLog: [],        // 완료한 롤플레이 기록
+      anxiety: { level: null, log: [] },  // 발표불안 자기보고 추이
+      preset: "balanced",     // 트랙 프리셋 (balanced|speaking|social|writing)
       drills: { done: [], correct: 0, total: 0 },  // A/B 안목 훈련 기록
       aiUsage: { date: "", count: 0 },  // 오늘 AI 호출 수 (절약 확인용)
       settings: {
@@ -83,6 +109,8 @@
     if (!s.quality) s.quality = [];
     if (!s.speech) s.speech = [];
     if (!s.roleplayLog) s.roleplayLog = [];
+    if (!s.anxiety) s.anxiety = { level: null, log: [] };
+    if (!s.preset || !TRACK_PRESETS[s.preset]) s.preset = "balanced";
     if (!s.drills) s.drills = { done: [], correct: 0, total: 0 };
     if (!s.aiUsage) s.aiUsage = { date: "", count: 0 };
     if (!set.provider) set.provider = "gemini";
@@ -359,7 +387,8 @@
 
   function trackForDay(day) {
     if (day <= 1) return "diagnostic";
-    return TRACK_PATTERN[(day - 2) % TRACK_PATTERN.length];
+    const pat = currentPattern();
+    return pat[(day - 2) % pat.length];
   }
 
   function weakestSkill(track) {
@@ -380,6 +409,19 @@
         const cands = pool.filter(l => l.dim === weakDim)
           .sort((a, b) => ((state.skills[a.id] || {}).lastDay || 0) - ((state.skills[b.id] || {}).lastDay || 0));
         if (cands.length) return cands[0];
+      }
+    }
+    /* 노출 위계 — 불안이 높다고 보고한 학습자는 쉬운 말하기 과제부터.
+       회피를 막으려면 난이도를 단계적으로 올려야 한다(행동치료의 표준). */
+    if (track === "speak") {
+      const log = (state.anxiety && state.anxiety.log) || [];
+      const recent = log.slice(-3);
+      const avgAnx = recent.length ? recent.reduce((a, b) => a + b.level, 0) / recent.length : 0;
+      if (avgAnx >= 4) {
+        // 긴장도가 높으면 준비 시간이 길고 발화가 짧은 과제부터
+        const easy = pool.filter(l => l.speak && (l.speak.speakSec || 0) <= 60)
+          .sort((a, b) => ((state.skills[a.id] || {}).lastDay || 0) - ((state.skills[b.id] || {}).lastDay || 0));
+        if (easy.length) return easy[0];
       }
     }
     // 진단으로 만든 맞춤 커리큘럼이 있으면 그 순서를 우선한다
@@ -915,6 +957,7 @@ ${SPEECH_THEORY}
 
     const stageViews = {
       brief: [viewBrief, wireBrief],
+      ritual: [viewRitual, wireRitual],
       write: [viewWrite, wireWrite],
       notice: [viewNotice, wireNotice],
       feedback: [viewFeedback, wireFeedback],
@@ -1022,6 +1065,7 @@ ${SPEECH_THEORY}
   "writeFocus": ["구조 기술 id 4개 — 목표에 가까운 순서대로 (2주치)"],
   "speakFocus": ["말하기 기술 id 4개 — 순서대로 (2주치)"],
   "qualityFocus": ["품질 기술 id 4개 — 목표 장르에서 가장 중요한 품질 축부터 (2주치)"],
+  "socialFocus": ["사회성 기술 id 4개 — 대화·관계 목표가 있을 때 (없으면 빈 배열)"],
   "focusWhy": {"기술id": "이 기술이 학습자의 목표에 왜 필요한지 한 문장. 목표를 직접 언급할 것."},
   "recommendCats": ["실전 말하기 카테고리 key 1~3개 — 목표와 관련된 것만"],
   "advice": "첫 주에 특히 신경 쓸 것을 3~4문장으로. 학습자의 목표와 연결해서."
@@ -1043,6 +1087,7 @@ weaknesses의 skillId는 구조·품질 목록 어디서든 고를 수 있습니
     const wl = WRITE_POOL.map(l => `${l.id}: ${l.skill}`).join("\n");
     const sl = SPEAK_POOL.map(l => `${l.id}: ${l.skill}`).join("\n");
     const ql = QUALITY_POOL.map(l => `${l.id}: ${l.skill} [${(dimOf(l.dim) || {}).label || l.dim}]`).join("\n");
+    const sol = SOCIAL_POOL.map(l => `${l.id}: ${l.skill} [${(dimOf(l.dim) || {}).label || l.dim}]`).join("\n");
     const d = localDiagnose(text), m = d.metrics;
     return `[학습자 목표]
 ${goal || "(밝히지 않음)"}
@@ -1063,6 +1108,9 @@ ${sl}
 
 [품질 기술 id 목록 — 개연성·흥미·어휘·밀도·목소리·독자 배려]
 ${ql}
+
+[사회성 기술 id 목록 — 체면·경청·주고받기·온기]
+${sol}
 
 위 학습자를 진단하고 맞춤 커리큘럼을 JSON으로 설계하세요.`;
   }
@@ -1155,14 +1203,15 @@ ${ql}
   }
   /* fromDay 부터 2주치(14일)를 배치한다. 목표에 맞춘 순서를 오래 유지하려면
      1주만 짜서는 부족하다 — 2주차 이후 목표 영향이 사라지기 때문이다. */
-  function buildPlanFromFocus(writeFocus, speakFocus, qualityFocus, fromDay) {
+  function buildPlanFromFocus(writeFocus, speakFocus, qualityFocus, fromDay, socialFocus) {
     const start = fromDay || 2;
     const end = start + 13;
     const pick = (ids, pool) => (ids || []).filter(id => pool.find(l => l.id === id));
     const map = [
       ["write", pick(writeFocus, WRITE_POOL)],
       ["speak", pick(speakFocus, SPEAK_POOL)],
-      ["quality", pick(qualityFocus, QUALITY_POOL)]
+      ["quality", pick(qualityFocus, QUALITY_POOL)],
+      ["social", pick(socialFocus, SOCIAL_POOL)]
     ];
     const plan = {};
     map.forEach(([track, ids]) => {
@@ -1193,7 +1242,7 @@ ${ql}
       state.focusWhy = j.focusWhy || {};
       state.recommendCats = (j.recommendCats || []).filter(k => PRACTICE_CATS.find(c => c.key === k));
       state.planFrom = 2;
-      state.plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus, 2);
+      state.plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus, 2, j.socialFocus);
       // 약점을 기술 추적에 심어 간격 반복이 다시 꺼내게 한다
       weaknesses.forEach(w => {
         state.skills[w.skillId] = { rating: 1, seen: 0, lastDay: 0 };
@@ -1217,7 +1266,7 @@ ${ql}
       };
       const ofTrack = (t) => ws.filter(w => (byId(w.skillId) || {}).track === t).map(w => w.skillId);
       state.planFrom = 2;
-      state.plan = buildPlanFromFocus(ofTrack("write"), ofTrack("speak"), ofTrack("quality"), 2);
+      state.plan = buildPlanFromFocus(ofTrack("write"), ofTrack("speak"), ofTrack("quality"), 2, ofTrack("social"));
       ws.forEach(w => { state.skills[w.skillId] = { rating: 1, seen: 0, lastDay: 0 }; });
     }
     _diagRunning = false;
@@ -1245,6 +1294,7 @@ ${ql}
   "writeFocus": ["구조 기술 id 4개"],
   "qualityFocus": ["품질 기술 id 4개"],
   "speakFocus": ["말하기 기술 id 4개"],
+  "socialFocus": ["사회성 기술 id 4개 (해당 없으면 빈 배열)"],
   "focusWhy": {"기술id":"목표와의 연결 한 문장"},
   "recommendCats": ["실전 카테고리 key 1~3개"],
   "advice": "다음 2주 학습 방향 3~4문장"
@@ -1290,6 +1340,9 @@ ${listOf(QUALITY_POOL)}
 [말하기 기술 목록]
 ${listOf(SPEAK_POOL)}
 
+[사회성 기술 목록]
+${listOf(SOCIAL_POOL)}
+
 Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
   }
 
@@ -1303,7 +1356,7 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     try {
       const raw = await callAI(PLAN_SYSTEM, planUserMessage(fromDay), 2800, true);
       const j = extractJSON(raw);
-      const plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus, fromDay);
+      const plan = buildPlanFromFocus(j.writeFocus, j.speakFocus, j.qualityFocus, fromDay, j.socialFocus);
       if (!Object.keys(plan).length) throw new Error("유효한 기술 id가 없습니다");
       state.plan = plan;
       state.planFrom = fromDay;
@@ -1486,7 +1539,75 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
     </div>`;
   }
   function wireBrief(sess) {
-    $("#to-write").addEventListener("click", () => { sess.stage = "write"; save(); renderToday(); });
+    const L = lessonOf(sess);
+    // 말하기는 발화 전 불안 리추얼을 한 번 거친다(회피를 막고 각성을 재해석)
+    const next = (L.track === "speak" && L.speak) ? "ritual" : "write";
+    $("#to-write").addEventListener("click", () => { sess.stage = next; save(); renderToday(); });
+  }
+
+  /* ==================== 발표불안 모듈 ====================
+   * 말 잘하기 이전에 불안이 병목인 학습자가 많다. 회피는 불안을 강화하므로
+   * '불안을 없애는' 대신 '각성을 다르게 해석하고 주의를 밖으로 돌리는' 접근을 쓴다.
+   * 말하기 과제 직전 90초 리추얼로 배치. API 0원. */
+  function viewRitual(sess, L) {
+    const steps = ANXIETY.ritual.map((r, i) => `
+      <div class="ritual-step" data-i="${i}">
+        <div class="rs-head"><span class="rs-n">${i + 1}</span>${esc(r.title)}
+          <span class="rs-sec">${r.sec}초</span></div>
+        <div class="rs-body">${esc(r.body)}</div>
+      </div>`).join("");
+    const card = ANXIETY.cards[Math.floor(Math.random() * ANXIETY.cards.length)];
+    const lvl = state.anxiety && state.anxiety.level;
+    return `
+    <div class="session-step">
+      <span class="step-kicker ${L.track}">DAY ${sess.day} · 말하기 전 준비</span>
+
+      <div class="card">
+        <h2>🧘 발화 전 90초</h2>
+        <p class="muted small">불안은 없애는 게 아니라 다르게 쓰는 겁니다. 세 단계를 실제로 해보세요 —
+        읽기만 하면 효과가 없습니다.</p>
+        ${steps}
+      </div>
+
+      <div class="card anx-card">
+        <div class="anx-head">💭 이런 생각이 드나요?</div>
+        <div class="anx-fear">“${esc(card.fear)}”</div>
+        <div class="anx-fact">${esc(card.fact)}</div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">지금 긴장도는 어느 정도인가요?</div>
+        <div class="anx-scale">
+          ${[1, 2, 3, 4, 5].map(n => `<button class="anx-lv ${lvl === n ? "on" : ""}" data-lv="${n}">${n}</button>`).join("")}
+        </div>
+        <div class="anx-scale-label"><span>편안함</span><span>매우 긴장</span></div>
+        <p class="muted small" style="margin-top:8px">기록해두면 회차가 쌓일수록 변화가 보입니다.</p>
+      </div>
+
+      <button class="btn primary" id="ritual-done">준비됐어요 · 말하기 시작</button>
+      <button class="btn ghost small" id="ritual-skip">건너뛰기</button>
+    </div>`;
+  }
+  function wireRitual(sess, L) {
+    $$(".anx-lv").forEach(b => b.addEventListener("click", () => {
+      const lv = parseInt(b.getAttribute("data-lv"), 10);
+      state.anxiety = state.anxiety || { log: [] };
+      state.anxiety.level = lv;
+      $$(".anx-lv").forEach(x => x.classList.toggle("on", x === b));
+      save();
+    }));
+    const go = () => {
+      // 긴장도를 세션에 기록해 추이로 남긴다
+      if (state.anxiety && state.anxiety.level) {
+        state.anxiety.log = state.anxiety.log || [];
+        state.anxiety.log.push({ date: todayStr(), day: sess.day, level: state.anxiety.level });
+        sess.anxietyBefore = state.anxiety.level;
+        state.anxiety.level = null;
+      }
+      sess.stage = "write"; save(); renderToday();
+    };
+    $("#ritual-done").addEventListener("click", go);
+    $("#ritual-skip").addEventListener("click", () => { sess.stage = "write"; save(); renderToday(); });
   }
 
   /* ---- write: 제출 (말하기는 타이머) ---- */
@@ -2241,10 +2362,61 @@ Day ${fromDay}부터 2주 커리큘럼을 목표에 맞춰 설계하세요.`;
         <div class="skill-group-grid">${pool.map(chip).join("")}</div></div>`;
     }).join("");
 
+    renderPresetGrid();
+    renderAnxietyPanel();
     renderQualityPanel();
     renderDrillStat();
     renderHeatmap();
     renderWeeklyReview();
+  }
+
+  /* 훈련 비중 프리셋 선택 */
+  function renderPresetGrid() {
+    const el = $("#preset-grid");
+    if (!el) return;
+    el.innerHTML = Object.keys(TRACK_PRESETS).map(k => {
+      const p = TRACK_PRESETS[k];
+      const counts = {};
+      p.pattern.forEach(t => { counts[t] = (counts[t] || 0) + 1; });
+      const mix = Object.keys(counts).map(t => `${(TRACK_ICONS[t] || t).split(" ")[0]}${counts[t]}`).join(" ");
+      return `<button class="preset-btn ${state.preset === k ? "on" : ""}" data-preset="${k}">
+        <div class="pb-label">${esc(p.label)}</div>
+        <div class="pb-desc">${esc(p.desc)}</div>
+        <div class="pb-mix">${mix}</div>
+      </button>`;
+    }).join("");
+    $$(".preset-btn").forEach(b => b.addEventListener("click", () => {
+      const k = b.getAttribute("data-preset");
+      if (k === state.preset) return;
+      state.preset = k;
+      // 프리셋이 바뀌면 기존 계획의 트랙이 안 맞으므로 계획을 비운다
+      state.plan = {}; state.planFrom = 0; state.planStale = !!state.goals;
+      save(); renderProgress(); renderToday();
+      setStatus("#preset-status", `‘${TRACK_PRESETS[k].label}’으로 바꿨어요. 다음 세션부터 적용됩니다.` +
+        (state.goals ? " 목표에 맞춰 다시 계획하면 더 정확해져요." : ""), "ok");
+    }));
+  }
+
+  /* 긴장도 추이 — 노출 반복으로 줄어드는지 보여준다 */
+  function renderAnxietyPanel() {
+    const card = $("#anxiety-card"), el = $("#anxiety-panel");
+    if (!card || !el) return;
+    const log = (state.anxiety && state.anxiety.log) || [];
+    if (!log.length) { card.style.display = "none"; return; }
+    card.style.display = "block";
+    const bars = log.slice(-14).map(l =>
+      `<span class="anx-bar" style="height:${l.level / 5 * 100}%" title="Day ${l.day}: ${l.level}/5"></span>`).join("");
+    const first = log[0].level, last = log[log.length - 1].level;
+    const avg = (log.reduce((a, b) => a + b.level, 0) / log.length).toFixed(1);
+    const diff = last - first;
+    return el.innerHTML = `
+      <p class="muted small">말하기 ${log.length}회 기록 · 평균 ${avg}/5
+        ${log.length > 1 ? `· 처음 ${first} → 최근 ${last} <b class="${diff < 0 ? "sv-ok" : diff > 0 ? "sv-warn" : ""}">(${diff > 0 ? "+" : ""}${diff})</b>` : ""}</p>
+      <div class="anx-chart">${bars}</div>
+      <p class="muted small" style="margin-top:8px">${diff < 0
+        ? "반복 노출로 긴장이 줄고 있어요. 회피하지 않은 것이 효과를 만들고 있습니다."
+        : log.length < 3 ? "몇 회 더 쌓이면 변화가 보입니다. 불안은 회피하면 커지고 반복하면 줄어듭니다."
+        : "아직 긴장이 높네요. 준비 시간이 긴 짧은 과제부터 다시 쌓아보세요."}</p>`;
   }
 
   /* 품질 6축 추이 — 첫 리포트 대비 최신 리포트, 축별 평균과 스파크라인 */
