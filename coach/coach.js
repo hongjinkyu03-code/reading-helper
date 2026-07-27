@@ -3243,61 +3243,73 @@ ${text}
   /* ==================== 썰 해부 (API 0원) ====================
    * 같은 사건의 밋밋한 버전과 재밌는 버전을 나란히 놓고, 무엇이 달라졌는지
    * 먼저 스스로 찾게 한다(주목 가설). 안목이 먼저 서야 내 썰도 고칠 수 있다. */
-  let studyIdx = 0, studyRevealed = false, studyPicks = [];
+  /* 썰 해부 — 예전엔 '고르고 정답 확인'(인식)이었는데, 인식만으로는 자기 썰이 안 는다.
+     이제는 밋밋한 원본을 직접 다시 써보고(생산), 그다음에야 예시와 로컬 스캔으로 비교한다.
+     Ericsson의 요점: 실력은 알아보는 것이 아니라 만들어보고 즉시 되짚을 때 는다. */
+  let studyIdx = 0, studyRevealed = false, studyDraft = "";
   function viewStudy() {
     const p = STORY_PAIRS[studyIdx % STORY_PAIRS.length];
     const done = (state.studyDone || []).length;
+    const header = `
+      <div class="card" style="padding:14px 16px">
+        <h2 style="margin-bottom:6px">🔬 썰 리라이트 훈련 <span class="sub">직접 다시 써보기</span></h2>
+        <p class="practice-intro">밋밋한 사건을 <b>당신이 먼저 재밌게 다시 써보세요.</b>
+        쓰고 나면 실제 재밌는 버전과 바로 비교해서, 뭘 더 넣으면 좋을지 확인합니다.
+        읽고 알아보는 것과 직접 써보는 것은 다른 훈련입니다 — 실력은 쓸 때 늡니다.
+        <span class="muted" style="font-size:12px">· AI 호출 없음 · ${done}/${STORY_PAIRS.length}편 연습</span></p>
+      </div>`;
+    if (!studyRevealed) {
+      return header + `
+      <div class="card">
+        <div class="study-title">📌 ${esc(p.title)}</div>
+        <div class="study-ver flat">
+          <div class="sv-head">😐 밋밋한 버전 (원본)</div>
+          <div class="sv-body">${esc(p.flat)}</div>
+        </div>
+        <div class="section-label">이 사건, 당신이라면 어떻게 재밌게 풀까요?</div>
+        <textarea id="study-rewrite" rows="6" placeholder="직접 다시 써보세요. 대사·현재형·쉼(...)·확대 표지를 써보면 좋아요.">${esc(studyDraft)}</textarea>
+        <div class="char-count" id="study-count">${charLen(studyDraft)}자</div>
+        <button class="btn primary" id="study-submit">비교하기</button>
+      </div>`;
+    }
+    const sc = localStoryScan(studyDraft);
     const tagChips = p.tags.map(t => {
       const d = STORY_DIMS.find(x => x.key === t);
       return d ? `<span class="tag-chip">${d.emoji} ${esc(d.label)}</span>` : "";
     }).join("");
-    return `
-      <div class="card" style="padding:14px 16px">
-        <h2 style="margin-bottom:6px">🔬 썰 해부 <span class="sub">같은 사건, 다른 이야기</span></h2>
-        <p class="practice-intro">똑같은 일을 두 사람이 말했습니다. 무엇이 달라서 한쪽이 재밌는지
-        <b>먼저 스스로 찾아보세요.</b> 안목이 먼저 서야 내 썰도 고칠 수 있습니다.
-        <span class="muted" style="font-size:12px">· AI 호출 없음 · ${done}/${STORY_PAIRS.length}편 학습</span></p>
-      </div>
-
+    return header + `
       <div class="card">
         <div class="study-title">📌 ${esc(p.title)}</div>
         <div class="study-ver flat">
-          <div class="sv-head">😐 밋밋한 버전</div>
+          <div class="sv-head">😐 원본</div>
           <div class="sv-body">${esc(p.flat)}</div>
         </div>
+        <div class="study-ver mine">
+          <div class="sv-head">✍️ 내가 쓴 버전</div>
+          <div class="sv-body">${esc(studyDraft)}</div>
+        </div>
+        <div class="section-label">내 버전 장치 점검 (기계 분석)</div>
+        ${storyScanHTML(sc)}
         <div class="study-ver good">
-          <div class="sv-head">😂 재밌는 버전</div>
+          <div class="sv-head">😂 재밌는 버전 (예시)</div>
           <div class="sv-body">${esc(p.good)}</div>
         </div>
-
-        ${!studyRevealed ? `
-          <div class="section-label">무엇이 달라졌나요? (여러 개 선택)</div>
-          <div class="study-picks">${STORY_DIMS.map(d =>
-            `<button class="pick-chip ${studyPicks.indexOf(d.key) >= 0 ? "on" : ""}" data-k="${d.key}">${d.emoji} ${esc(d.label)}</button>`).join("")}</div>
-          <button class="btn primary" id="study-reveal">확인하기</button>
-        ` : `
-          <div class="section-label">정답 — 이 예시가 쓴 장치</div>
-          <div class="study-answer">${tagChips}</div>
-          ${studyPicks.length ? `<p class="muted small">내가 고른 것: ${studyPicks.map(k => {
-            const d = STORY_DIMS.find(x => x.key === k);
-            const hit = p.tags.indexOf(k) >= 0;
-            return `<b class="${hit ? "sv-ok" : "sv-warn"}">${d ? d.label : k}${hit ? " ✓" : " ✗"}</b>`;
-          }).join(", ")}</p>` : ""}
-          <div class="fb-block fb-now"><span class="fb-h">왜 달라졌나</span>${esc(p.why)}</div>
-          <div class="fb-block fb-next"><span class="fb-h">기억할 원칙</span>${esc(p.lesson)}</div>
-          <button class="btn primary" id="study-next">다음 편</button>
-        `}
+        <div class="section-label">이 예시가 쓴 장치</div>
+        <div class="study-answer">${tagChips}</div>
+        <div class="fb-block fb-now"><span class="fb-h">왜 달라졌나</span>${esc(p.why)}</div>
+        <div class="fb-block fb-next"><span class="fb-h">기억할 원칙</span>${esc(p.lesson)}</div>
+        <button class="btn primary" id="study-next">다음 편</button>
       </div>`;
   }
   function wireStudy() {
-    $$(".pick-chip").forEach(b => b.addEventListener("click", () => {
-      const k = b.getAttribute("data-k");
-      const i = studyPicks.indexOf(k);
-      if (i >= 0) studyPicks.splice(i, 1); else studyPicks.push(k);
-      b.classList.toggle("on", studyPicks.indexOf(k) >= 0);
-    }));
-    const rv = $("#study-reveal");
-    if (rv) rv.addEventListener("click", () => {
+    const ta = $("#study-rewrite");
+    if (ta) ta.addEventListener("input", () => {
+      studyDraft = ta.value;
+      const cc = $("#study-count"); if (cc) cc.textContent = charLen(ta.value) + "자";
+    });
+    const sub = $("#study-submit");
+    if (sub) sub.addEventListener("click", () => {
+      if (charLen(studyDraft) < 20) { alert("조금 더 써보세요. 20자는 넘어야 비교할 수 있어요."); return; }
       studyRevealed = true;
       const p = STORY_PAIRS[studyIdx % STORY_PAIRS.length];
       state.studyDone = state.studyDone || [];
@@ -3307,7 +3319,7 @@ ${text}
     });
     const nx = $("#study-next");
     if (nx) nx.addEventListener("click", () => {
-      studyIdx++; studyRevealed = false; studyPicks = [];
+      studyIdx++; studyRevealed = false; studyDraft = "";
       renderPractice(); window.scrollTo(0, 0);
     });
   }
@@ -4371,7 +4383,7 @@ ${ap.response}
     setInterval(checkNotification, 30 * 1000);
     if (state.settings.notify.enabled) setupPeriodicSync();
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js").then(async () => {
+      navigator.serviceWorker.register("sw.js").then(async (reg) => {
         // 백그라운드에서 이미 알림을 보냈다면(IndexedDB에 기록됨) 중복 발송 방지를 위해 반영
         try {
           const idbNotify = await idbGet("notify");
@@ -4382,6 +4394,12 @@ ${ap.response}
             save();
           }
         } catch (e) { /* 무시 */ }
+        // 아이폰 홈 화면 앱(standalone)은 새 버전이 나와도 자동으로 갱신 확인을 안 하는
+        // 경우가 있다(iOS WebKit의 알려진 문제) — 그래서 앱을 열 때마다 직접 확인을 요청한다.
+        reg.update().catch(() => {});
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") reg.update().catch(() => {});
+        });
       }).catch(() => {});
       // 새 버전의 서비스 워커가 제어권을 넘겨받으면 한 번 새로고침해 새 화면을 바로 반영한다.
       // 홈 화면에 설치해 거의 안 닫는 아이폰 앱에서는 이게 없으면 새 기능이 안 보이는 채로 남는다.
