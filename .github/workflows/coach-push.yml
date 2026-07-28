@@ -1,0 +1,33 @@
+name: 코치 앱 학습 알림 (하루 2회 푸시)
+
+on:
+  schedule:
+    - cron: "0 0 * * *"    # 09:00 KST — 아침 권유
+    - cron: "30 11 * * *"  # 20:30 KST — 저녁 스트릭 경고
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "테스트용 강제 슬롯 (morning 또는 evening, 비우면 스케줄에 따름)"
+        required: false
+        default: ""
+
+jobs:
+  send-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 의존성 설치
+        working-directory: .github/scripts
+        run: npm install --no-audit --no-fund
+      - name: 푸시 발송
+        working-directory: .github/scripts
+        env:
+          VAPID_PUBLIC_KEY: ${{ secrets.COACH_VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.COACH_VAPID_PRIVATE_KEY }}
+          PUSH_SUBSCRIPTIONS: ${{ secrets.COACH_PUSH_SUBSCRIPTIONS }}
+          GH_SCHEDULE: ${{ github.event.schedule }}
+          FORCED_SLOT: ${{ github.event.inputs.slot }}
+        run: node send-coach-push.js

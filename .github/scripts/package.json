@@ -1,0 +1,8 @@
+{
+  "name": "coach-push-sender",
+  "private": true,
+  "description": "학습 알림(코치 앱)을 하루 두 번 실제 푸시로 보내는 GitHub Actions 전용 스크립트",
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

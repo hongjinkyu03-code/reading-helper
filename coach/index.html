@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#4338ca">
+  <title>글쓰기·말하기 코치</title>
+  <meta name="description" content="언어학·교육심리학·수사학에 근거해 매일 과제와 피드백을 주는 글쓰기·말하기 코치">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="coach.css">
+
+  <!-- iOS: 홈 화면 앱(전체화면) 설정 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="글말 코치">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+  <link rel="icon" type="image/png" href="icon-192.png">
+
+  <!-- iOS 실행 스플래시 (기기별) -->
+  <link rel="apple-touch-startup-image" href="splash/splash-1290x2796.png"
+    media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1179x2556.png"
+    media="(device-width:393px) and (device-height:852px) and (-webkit-device-pixel-ratio:3)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1170x2532.png"
+    media="(device-width:390px) and (device-height:844px) and (-webkit-device-pixel-ratio:3)">
+  <link rel="apple-touch-startup-image" href="splash/splash-1125x2436.png"
+    media="(device-width:375px) and (device-height:812px) and (-webkit-device-pixel-ratio:3)">
+  <link rel="apple-touch-startup-image" href="splash/splash-828x1792.png"
+    media="(device-width:414px) and (device-height:896px) and (-webkit-device-pixel-ratio:2)">
+  <link rel="apple-touch-startup-image" href="splash/splash-750x1334.png"
+    media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)">
+</head>
+<body>
+  <div class="top-fixed">
+    <header class="app-header">
+      <h1>✍️ 마스터 코치</h1>
+      <span id="header-usage"></span>
+      <span id="header-day"></span>
+    </header>
+    <div class="mode-bar" id="mode-bar" style="display:none">
+      <span class="mode-lbl mode-lbl-write">✍️ 글쓰기</span>
+      <button class="mode-switch" id="mode-switch" role="switch" aria-checked="false" aria-label="글쓰기·말하기 모드 전환">
+        <span class="mode-knob"></span>
+      </button>
+      <span class="mode-lbl mode-lbl-speak">🎙️ 말하기</span>
+    </div>
+  </div>
+
+  <main>
+    <!-- ===================== 오늘 탭 (세션) ===================== -->
+    <section id="tab-today" class="tab active">
+      <div id="session-root"><!-- coach.js 가 세션 단계별 화면을 렌더링 --></div>
+    </section>
+
+    <!-- ===================== 실전 말하기 탭 ===================== -->
+    <section id="tab-practice" class="tab">
+      <div id="practice-root"><!-- coach.js 가 렌더링 --></div>
+    </section>
+
+    <!-- ===================== 진도 탭 ===================== -->
+    <section id="tab-progress" class="tab">
+      <div class="stat-row">
+        <div class="card stat-card">
+          <div class="stat-value" id="stat-day">0</div>
+          <div class="stat-label">진행한 Day</div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-value" id="stat-streak">0</div>
+          <div class="stat-label">🔥 연속 (일)</div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-value" id="stat-done">0</div>
+          <div class="stat-label">완료 세션</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🎯 나의 목표 <span class="sub">커리큘럼의 기준</span></h2>
+        <p id="progress-goals" class="muted">아직 목표를 설정하지 않았어요.</p>
+        <div id="goal-read-box"></div>
+        <button class="btn ghost small" id="edit-goals">목표 수정</button>
+        <button class="btn ghost small" id="replan-goal">목표에 맞춰 다시 계획 <span class="muted">(호출 1회)</span></button>
+        <p id="goal-status" class="notify-status"></p>
+      </div>
+
+      <div class="card">
+        <h2>🎚️ 훈련 비중 <span class="sub">무엇에 집중할지</span></h2>
+        <p class="muted small">목표에 맞게 트랙 비율을 바꿉니다. 바꾸면 다음 세션부터 적용돼요.</p>
+        <div id="preset-grid"></div>
+        <p id="preset-status" class="notify-status"></p>
+      </div>
+
+      <div class="card" id="anxiety-card" style="display:none">
+        <h2>🧘 긴장도 추이 <span class="sub">말하기 전 자기보고</span></h2>
+        <div id="anxiety-panel"></div>
+      </div>
+
+      <div class="card" id="quality-card" style="display:none">
+        <h2>✨ 글의 수준 6축 <span class="sub">독자 리포트 누적</span></h2>
+        <div id="quality-panel"></div>
+      </div>
+
+      <div class="card" id="drill-stat-card" style="display:none">
+        <h2>👁️ 안목 훈련 <span class="sub">A/B 비교 정답률</span></h2>
+        <div id="drill-stat"></div>
+      </div>
+
+      <div class="card">
+        <h2>💪 기술별 성장 <span class="sub">스스로 평가 기준</span></h2>
+        <div id="skill-grid"></div>
+        <p class="legend">
+          <i class="dot d-weak"></i> 더 필요
+          <i class="dot d-mid"></i> 그럭저럭
+          <i class="dot d-strong"></i> 편해짐
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>📅 연습 잔디밭 <span class="sub">최근 12주</span></h2>
+        <div id="heatmap" class="heatmap"></div>
+      </div>
+
+      <div class="card" id="weekly-review-card" style="display:none">
+        <h2>🗓️ 주간 성장 리뷰</h2>
+        <div id="weekly-review-body"></div>
+      </div>
+    </section>
+
+    <!-- ===================== 기록 탭 ===================== -->
+    <section id="tab-log" class="tab">
+      <div class="card" id="practice-log-card" style="display:none">
+        <h2>🎤 실전 말하기 연습</h2>
+        <div id="practice-log"></div>
+      </div>
+      <div class="card">
+        <h2>📝 데일리 세션</h2>
+        <p class="muted small">과제 원본과 재도전을 다시 열어볼 수 있어요. 첫 주에 쓴 글을 나중에 다시 고쳐 쓰면 성장이 보입니다.</p>
+        <div id="log-list"></div>
+      </div>
+    </section>
+
+    <!-- ===================== 설정 탭 ===================== -->
+    <section id="tab-settings" class="tab">
+      <div class="card">
+        <h2>🔄 앱 버전 <span class="sub">새 기능이 안 보일 때</span></h2>
+        <p class="muted small">
+          홈 화면에 설치한 앱은 새 버전이 나와도 자동으로 안 바뀔 때가 있어요(특히 아이폰).
+          아래 버튼을 누르면 캐시를 지우고 서버의 최신 버전을 강제로 다시 받아옵니다.
+        </p>
+        <p class="muted small">현재 버전: <b id="app-version">-</b></p>
+        <button class="btn primary" id="force-update">지금 업데이트 확인</button>
+        <p id="update-status" class="notify-status"></p>
+      </div>
+
+      <div class="card">
+        <h2>🤖 AI 코치 피드백 <span class="sub">선택 · 무료 가능</span></h2>
+        <p class="muted small">
+          이 앱은 AI 없이도 완전히 동작해요(스스로 발견하는 자기 주목 방식). 여기에 API 키를 넣으면,
+          제출한 글·말에 대해 진짜 맞춤 피드백을 받을 수 있어요. <b>Google Gemini는 무료</b>로 쓸 수 있습니다.
+          키는 이 기기(브라우저)에만 저장되며 저희 서버로는 전송되지 않습니다.
+        </p>
+        <label>AI 제공자
+          <select id="set-provider">
+            <option value="gemini">Google Gemini (무료 · 권장)</option>
+            <option value="anthropic">Anthropic Claude (유료)</option>
+          </select>
+        </label>
+        <label>API 키
+          <input type="password" id="set-apikey" placeholder="AIza…">
+        </label>
+        <p class="muted" id="key-help" style="font-size:12px; margin-top:6px"></p>
+        <label>모델
+          <select id="set-model"></select>
+        </label>
+        <label class="row-check">
+          <input type="checkbox" id="set-ai-enabled"> AI 피드백 사용
+        </label>
+        <label class="row-check">
+          <input type="checkbox" id="set-ai-saver"> 절약 모드 — 버튼을 누를 때만 AI 호출
+        </label>
+        <p class="muted" style="font-size:12px; margin-top:4px">
+          절약 모드를 켜면 피드백이 자동으로 호출되지 않고, 필요할 때만 <b>“피드백 받기”</b>를 눌러 사용합니다.
+          한 번 받은 피드백은 저장되어 다시 호출하지 않아요.
+        </p>
+        <label class="row-check">
+          <input type="checkbox" id="set-autogen"> 안목 훈련 문제를 매일 자동 생성
+        </label>
+        <p class="muted" style="font-size:12px; margin-top:4px">
+          안목 훈련 탭을 처음 여는 날 <b>하루 1회</b>만 호출해, 내 약점 축에 맞춘 새 A/B 문제를 만들어
+          기기에 영구 저장합니다. 검증을 통과한 문제만 추가되고, 마음에 안 드는 문제는 삭제할 수 있어요.
+        </p>
+        <label class="row-check">
+          <input type="checkbox" id="set-autogen-train"> 매일 훈련 문제도 매일 자동 생성
+        </label>
+        <p class="muted" style="font-size:12px; margin-top:4px">
+          훈련 탭을 처음 여는 날 <b>하루 1회</b>만 호출해, 정답률이 가장 낮은 기술을 겨냥한
+          새 고르기 문제를 만들어 문항 은행에 영구 추가합니다.
+        </p>
+        <label>하루 목표 호출 수 <span class="muted" style="font-size:12px">(무료 등급 한도는 시기마다 달라요 — 여유 있게 잡아두는 안전선)</span>
+          <input type="number" id="set-daily-budget" min="1" max="500" step="1">
+        </label>
+        <div class="usage-bar-wrap">
+          <div class="usage-bar-track"><div class="usage-bar-fill" id="usage-bar-fill"></div></div>
+          <p class="usage-row" id="usage-bar-text">오늘 0 / 40회 사용</p>
+        </div>
+        <button class="btn primary" id="save-settings">저장</button>
+        <button class="btn ghost small" id="test-ai">연결 테스트</button>
+        <p id="ai-status" class="notify-status"></p>
+      </div>
+
+      <div class="card">
+        <h2>⏰ 학습 알림 <span class="sub">하루 2번</span></h2>
+        <p class="muted small">
+          정해둔 시각에 오늘 세션 여부를 확인해서, 안 했으면 독촉을, 이미 했으면 칭찬을 보내요.
+          아침엔 하루를 권유하고, 저녁엔 연속 기록이 끊기기 전에 마지막으로 알려줘요.
+        </p>
+        <label>아침 알림 <input type="time" id="notify-morning" value="09:00"></label>
+        <label>저녁 알림 <input type="time" id="notify-evening" value="20:30"></label>
+        <button class="btn primary" id="notify-toggle">알림 켜기</button>
+        <button class="btn ghost small" id="notify-test">미리 보기</button>
+        <p id="notify-status" class="notify-status"></p>
+        <hr class="soft" style="margin:14px 0">
+        <p class="muted small">
+          <b>📲 진짜 푸시 알림</b> — 위 방식은 앱(탭)이 켜져 있어야 동작해요.
+          앱을 완전히 닫아도 받으려면, 홈 화면에 설치한 뒤 아래 버튼을 누르고
+          나온 코드를 저(클로드)에게 붙여넣어 주세요. 발송 인프라를 마저 연결해드릴게요.
+        </p>
+        <button class="btn ghost small" id="push-subscribe">푸시 알림 연결하기</button>
+        <div id="push-result" hidden>
+          <textarea id="push-json" readonly rows="4" style="margin-top:8px"></textarea>
+          <button class="btn ghost small" id="push-copy">📋 코드 복사</button>
+        </div>
+        <p id="push-status" class="notify-status"></p>
+      </div>
+
+      <div class="card" id="install-card">
+        <h2>📱 아이폰 홈 화면에 설치</h2>
+        <p class="muted small">사파리에서 <b>공유 → 홈 화면에 추가</b>를 하면 전체화면 앱으로 쓸 수 있어요.</p>
+        <button class="btn ghost small" id="show-install">설치 방법 보기</button>
+        <p class="notify-status ok" id="installed-note" style="display:none">이미 앱으로 설치되어 실행 중이에요 ✓</p>
+      </div>
+
+      <div class="card">
+        <h2>💾 데이터</h2>
+        <p class="muted small">모든 기록은 이 기기에만 저장됩니다.</p>
+        <button class="btn ghost small" id="export-data">기록 내보내기(JSON)</button>
+        <button class="btn ghost small danger" id="reset-data">전체 초기화</button>
+      </div>
+
+      <div class="card">
+        <h2>ℹ️ 코칭 원리</h2>
+        <p class="muted small">
+          의도적 연습(Ericsson) · 근접발달영역(Vygotsky) · 형성평가 피드백(Hattie&amp;Timperley) ·
+          산출 가설(Swain) · 주목 가설(Schmidt) · 인출/간격 반복(Roediger&amp;Karpicke) ·
+          인지부하 관리(Sweller) · 성장 마인드셋(Dweck).
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- iOS 홈 화면 설치 안내 -->
+  <div id="ios-install" class="install-sheet" hidden>
+    <div class="install-card">
+      <button class="install-x" id="ios-install-close" aria-label="닫기">✕</button>
+      <div class="install-logo">✍️</div>
+      <h2>아이폰 앱으로 설치하기</h2>
+      <p class="muted small">홈 화면에 추가하면 주소창 없이 <b>전체화면 앱</b>처럼 열리고, 오프라인에서도 동작해요.</p>
+      <ol class="install-steps">
+        <li>사파리 하단(또는 상단)의 <b>공유 버튼</b>
+          <span class="ios-share" aria-label="공유">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#0a84ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v13M12 3l-4 4M12 3l4 4"/><path d="M6 11H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/>
+            </svg>
+          </span> 을 누르세요.</li>
+        <li>메뉴에서 <b>“홈 화면에 추가”</b> 를 선택하세요.</li>
+        <li>오른쪽 위 <b>“추가”</b> 를 누르면 끝! 홈 화면에 <b>글말 코치</b> 아이콘이 생겨요.</li>
+      </ol>
+      <p class="muted" style="font-size:12px">※ 반드시 <b>사파리(Safari)</b>에서 열어야 설치돼요. (크롬·인앱 브라우저 불가)</p>
+      <button class="btn primary" id="ios-install-ok">알겠어요</button>
+    </div>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="tab-today"><span class="nav-icon">📝</span>오늘</button>
+    <button class="nav-btn" data-tab="tab-practice"><span class="nav-icon">🎤</span>실전</button>
+    <button class="nav-btn" data-tab="tab-progress"><span class="nav-icon">📈</span>진도</button>
+    <button class="nav-btn" data-tab="tab-log"><span class="nav-icon">📚</span>기록</button>
+    <button class="nav-btn" data-tab="tab-settings"><span class="nav-icon">⚙️</span>설정</button>
+  </nav>
+
+  <script src="curriculum.js"></script>
+  <script src="situations.js"></script>
+  <script src="quality.js"></script>
+  <script src="drills.js"></script>
+  <script src="speech.js"></script>
+  <script src="story.js"></script>
+  <script src="voice.js"></script>
+  <script src="train.js"></script>
+  <script src="coach.js"></script>
+</body>
+</html>
