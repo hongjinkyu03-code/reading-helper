@@ -57,6 +57,10 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  // 구글 로그인 중이면(firebase-sync.js가 연결해 둠) 클라우드에도 저장
+  if (window.dokseoBridge && window.dokseoBridge.onLocalSave) {
+    window.dokseoBridge.onLocalSave(state);
+  }
 }
 
 function uid() {
@@ -1080,6 +1084,109 @@ document.getElementById("book-genre").innerHTML =
 
 document.getElementById("today-date").textContent =
   new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+
+// ===== 다른 기기로 옮기기 (내보내기 / 가져오기) =====
+// 계정·서버 없이, 기록 전체를 JSON 파일 하나로 저장했다가 새 기기에서 그대로 불러옵니다.
+document.getElementById("backup-export").addEventListener("click", () => {
+  const payload = { app: "dokseo", exportedAt: new Date().toISOString(), data: state };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `독서기록_백업_${todayStr()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  document.getElementById("backup-status").textContent =
+    "✅ 저장됐어요! 이 파일을 새 폰으로 옮긴 뒤(카톡 '나에게 보내기', 이메일, 클라우드 등) 새 폰의 앱에서 '가져오기'로 불러오세요.";
+});
+
+document.getElementById("backup-import").addEventListener("click", () => {
+  document.getElementById("backup-file-input").click();
+});
+
+document.getElementById("backup-file-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ""; // 같은 파일 다시 선택해도 change가 발생하도록
+  if (!file) return;
+  const statusEl = document.getElementById("backup-status");
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const incoming = parsed.data || parsed; // 예전 형식(감싸지 않은 데이터)도 허용
+    if (!incoming || !Array.isArray(incoming.books)) {
+      throw new Error("이 파일은 독서 도우미 백업 파일이 아니에요.");
+    }
+
+    const hasExisting = state.books.length > 0 || state.logs.length > 0;
+    let merge = true;
+    if (hasExisting) {
+      merge = confirm(
+        `가져올 파일: 책 ${incoming.books.length}권, 기록 ${incoming.logs?.length || 0}개.\n\n` +
+        `[확인] = 지금 있는 기록과 합치기 (추천)\n[취소] = 지금 있는 기록을 지우고 파일 내용으로 교체`
+      );
+    }
+
+    if (merge) {
+      mergeState(incoming);
+    } else {
+      state = {
+        books: incoming.books || [],
+        logs: incoming.logs || [],
+        quotes: incoming.quotes || [],
+        actions: incoming.actions || [],
+        settings: incoming.settings || state.settings,
+      };
+    }
+    saveState();
+    render();
+    updateNotifyUI();
+    statusEl.textContent = `✅ 불러왔어요! (책 ${state.books.length}권, 기록 ${state.logs.length}개)`;
+  } catch (err) {
+    statusEl.textContent = "⚠️ 파일을 읽지 못했어요: " + err.message;
+  }
+});
+
+// 기존 데이터와 가져온 데이터를 id 기준으로 합칩니다 (같은 id는 가져온 쪽으로 갱신).
+function mergeState(incoming) {
+  function mergeById(existing, incomingList) {
+    const map = new Map(existing.map(item => [item.id, item]));
+    (incomingList || []).forEach(item => map.set(item.id, item));
+    return Array.from(map.values());
+  }
+  state.books = mergeById(state.books, incoming.books);
+  state.logs = mergeById(state.logs, incoming.logs);
+  state.quotes = mergeById(state.quotes, incoming.quotes);
+  state.actions = mergeById(state.actions, incoming.actions);
+  // 알림 설정은 지금 기기 설정을 우선 유지 (기기마다 알림 시간이 다를 수 있어서)
+}
+
+// firebase-sync.js(구글 로그인 모듈)가 이 창구를 통해서만 state를 읽고 씁니다.
+// (app.js는 Firebase를 몰라도 되고, firebase-sync.js는 이 함수들만 알면 됩니다)
+window.dokseoBridge = {
+  getState: () => state,
+  // 로그인 직후: 클라우드 데이터를 로컬과 합칩니다 (기존 파일가져오기와 같은 merge 로직 재사용)
+  mergeIncoming: (incoming) => {
+    mergeState(incoming);
+    saveState();
+    render();
+    updateNotifyUI();
+  },
+  // 다른 기기에서 온 실시간 변경을 반영할 때 (클라우드로 다시 안 보내도록 조용히 저장만)
+  applyRemote: (incoming) => {
+    state = {
+      books: incoming.books || [],
+      logs: incoming.logs || [],
+      quotes: incoming.quotes || [],
+      actions: incoming.actions || [],
+      settings: state.settings, // 알림 시간 등은 기기별로 다를 수 있어 유지
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    render();
+    updateNotifyUI();
+  },
+};
 
 render();
 updateNotifyUI();

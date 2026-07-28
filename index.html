@@ -8,6 +8,8 @@
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css">
   <link rel="apple-touch-icon" href="icon-192.png">
+  <!-- 구글 로그인 + 클라우드 동기화용 Firebase (무료 Spark 플랜) -->
+  <script type="module" src="firebase-sync.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -100,6 +102,30 @@
         <h2>📤 독서 리포트 공유</h2>
         <p class="notify-desc">이번 주 독서 현황을 이미지 카드로 만들어 친구에게 자랑해 보세요!</p>
         <button class="btn primary" id="share-make">리포트 이미지 만들기</button>
+      </div>
+
+      <div class="card">
+        <h2>☁️ 구글 계정으로 자동 동기화</h2>
+        <p class="notify-desc">로그인만 하면 기록이 자동으로 저장되고, 다른 폰에서 같은 계정으로 로그인하면 그대로 이어져요.</p>
+        <div id="sync-signed-out">
+          <button class="btn primary" id="sync-signin">🔵 구글로 로그인</button>
+        </div>
+        <div id="sync-signed-in" class="hidden">
+          <p class="notify-desc" id="sync-user-info"></p>
+          <button class="btn-small" id="sync-signout">로그아웃</button>
+        </div>
+        <p class="notify-status" id="sync-status"></p>
+      </div>
+
+      <div class="card">
+        <h2>📱 다른 기기로 옮기기 (파일로 백업)</h2>
+        <p class="notify-desc">로그인을 안 쓰고 싶다면, 기록을 파일 하나로 저장했다가 새 폰에서 그대로 불러올 수도 있어요.</p>
+        <div class="notify-row">
+          <button class="btn-small" id="backup-export">💾 내보내기</button>
+          <button class="btn-small" id="backup-import">📥 가져오기</button>
+        </div>
+        <input type="file" id="backup-file-input" accept="application/json" class="hidden">
+        <p class="notify-status" id="backup-status"></p>
       </div>
 
       <div class="card">
